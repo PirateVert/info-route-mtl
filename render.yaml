@@ -1,0 +1,8 @@
+# Blueprint for https://render.com — one Docker web service.
+# The React app and FastAPI /api share one URL.
+services:
+  - type: web
+    name: info-route-mtl
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/

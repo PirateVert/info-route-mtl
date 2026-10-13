@@ -1,0 +1,268 @@
+:root {
+  color-scheme: light;
+  --ink: #1c1915;
+  --muted: #5c5346;
+  --paper: #f6f1e8;
+  --card: #fffdf8;
+  --line: #e4d8c8;
+  --navy: #1f2a37;
+  --orange: #ea580c;
+  --orange-dark: #9a3412;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+}
+
+button, input, select { font: inherit; }
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px 16px 32px;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.tagline {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.lang {
+  display: flex;
+  border: 2px solid var(--navy);
+  border-radius: 999px;
+  overflow: hidden;
+  flex: none;
+}
+
+.lang button {
+  min-width: 52px;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--navy);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lang button[aria-pressed="true"] {
+  background: var(--navy);
+  color: #fff;
+}
+
+.search label,
+.filters label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.search input,
+.filters select {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+}
+
+.search button,
+.text-button {
+  min-height: 52px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.search button {
+  border: 0;
+  background: var(--orange);
+  color: white;
+  font-weight: 700;
+  padding: 0 18px;
+}
+
+.search button:disabled { opacity: 0.7; cursor: wait; }
+
+.filters {
+  margin: 16px 0;
+}
+
+.filters select { max-width: 100%; }
+
+.count, .hint, .place, .banner {
+  margin: 10px 0 0;
+}
+
+.hint, .count, .place { color: var(--muted); }
+
+.banner {
+  background: #fff4e8;
+  border: 2px solid var(--orange-dark);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.text-button {
+  margin-top: 8px;
+  border: 2px solid var(--navy);
+  background: transparent;
+  color: var(--navy);
+  font-weight: 700;
+  padding: 0 14px;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.map-wrap {
+  height: 58vh;
+  min-height: 320px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid var(--navy);
+  background: #d9e2dc;
+}
+
+.map { height: 100%; width: 100%; }
+
+.detail {
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.detail h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.25;
+}
+
+.borough-name {
+  margin: 6px 0 12px;
+  color: var(--muted);
+}
+
+.detail dl { margin: 0; }
+
+.detail dl div {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.detail dt {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--orange-dark);
+}
+
+.detail dd {
+  margin: 4px 0 0;
+  font-size: 1.12rem;
+}
+
+.side h3 {
+  margin: 18px 0 8px;
+  font-size: 1.25rem;
+}
+
+.site-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow: auto;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.site-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  padding: 12px 14px;
+  min-height: 64px;
+  cursor: pointer;
+}
+
+.site-list button.active { background: #fff1e6; }
+
+.site-list .street {
+  display: block;
+  font-weight: 700;
+}
+
+.site-list .meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+footer {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+footer p { margin: 0 0 8px; }
+
+footer a { color: var(--navy); }
+
+@media (min-width: 900px) {
+  .page { padding: 24px 24px 40px; }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(340px, 420px) 1fr;
+    align-items: start;
+  }
+  .map-wrap {
+    order: 2;
+    height: calc(100vh - 280px);
+    min-height: 560px;
+    position: sticky;
+    top: 16px;
+  }
+  .side { order: 1; }
+  .site-list { max-height: 32vh; }
+}
