@@ -5,4 +5,5 @@ services:
     name: info-route-mtl
     runtime: docker
     dockerfilePath: ./Dockerfile
+    plan: free
     healthCheckPath: /api/
