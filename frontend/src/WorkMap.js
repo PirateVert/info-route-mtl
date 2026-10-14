@@ -1,8 +1,35 @@
-import { useEffect, useMemo } from "react";
-import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { Fragment, useEffect, useMemo } from "react";
+import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 
 const MHM_CENTER = [45.571, -73.5352];
+
+function linePositions(geometry) {
+  if (!geometry || !geometry.coordinates) return [];
+  const { type, coordinates } = geometry;
+  if (type === "LineString") {
+    return [coordinates.filter((pair) => pair && pair.length >= 2).map(([lng, lat]) => [lat, lng])];
+  }
+  if (type === "MultiLineString") {
+    return coordinates
+      .map((line) => (line || []).filter((pair) => pair && pair.length >= 2).map(([lng, lat]) => [lat, lng]))
+      .filter((line) => line.length >= 2);
+  }
+  return [];
+}
+
+function markerColors(work, selected) {
+  if (selected) {
+    return { color: "#1f2a37", fillColor: "#1d4ed8", weight: 3 };
+  }
+  if (work.kind === "avis") {
+    return { color: "#065f46", fillColor: "#047857", weight: 3 };
+  }
+  if (work.kind === "mtq") {
+    return { color: "#5b21b6", fillColor: "#7c3aed", weight: 3 };
+  }
+  return { color: "#9a3412", fillColor: "#ea580c", weight: 2 };
+}
 
 function MapFocus({ works, selectedId, fitToken, here, focusPoints }) {
   const map = useMap();
@@ -54,7 +81,7 @@ export default function WorkMap({ works, selectedId, onSelect, fitToken, here, f
       zoom={13}
       scrollWheelZoom={false}
       className="map"
-      aria-label="Carte des travaux et des avis"
+      aria-label="Carte des travaux, des avis et des autoroutes"
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -77,22 +104,34 @@ export default function WorkMap({ works, selectedId, onSelect, fitToken, here, f
       )}
       {markers.map((work) => {
         const selected = work.id === selectedId;
-        const avis = work.kind === "avis";
+        const colors = markerColors(work, selected);
+        const lines = work.kind === "mtq" ? linePositions(work.geometry) : [];
         return (
-          <CircleMarker
-            key={work.id}
-            center={[work.lat, work.lng]}
-            radius={selected ? 14 : avis ? 9 : 10}
-            pathOptions={{
-              color: selected ? "#1f2a37" : avis ? "#065f46" : "#9a3412",
-              fillColor: selected ? "#1d4ed8" : avis ? "#047857" : "#ea580c",
-              fillOpacity: 0.92,
-              weight: avis ? 3 : 2,
-            }}
-            eventHandlers={{ click: () => onSelect(work) }}
-          >
-            <Tooltip>{work.title || work.street || work.borough}</Tooltip>
-          </CircleMarker>
+          <Fragment key={work.id}>
+            {lines.map((positions, index) => (
+              <Polyline
+                key={`${work.id}-line-${index}`}
+                positions={positions}
+                pathOptions={{
+                  color: selected ? "#1d4ed8" : "#7c3aed",
+                  weight: selected ? 6 : 4,
+                  opacity: 0.88,
+                }}
+                eventHandlers={{ click: () => onSelect(work) }}
+              />
+            ))}
+            <CircleMarker
+              center={[work.lat, work.lng]}
+              radius={selected ? 14 : work.kind === "mtq" ? 8 : work.kind === "avis" ? 9 : 10}
+              pathOptions={{
+                ...colors,
+                fillOpacity: 0.92,
+              }}
+              eventHandlers={{ click: () => onSelect(work) }}
+            >
+              <Tooltip>{work.title || work.street || work.borough}</Tooltip>
+            </CircleMarker>
+          </Fragment>
         );
       })}
     </MapContainer>

@@ -111,6 +111,7 @@ h1 {
 
 .legend .swatch.work { background: #ea580c; }
 .legend .swatch.avis { background: #047857; }
+.legend .swatch.mtq { background: #7c3aed; }
 
 .kind-pill {
   display: inline-block;
@@ -133,6 +134,11 @@ h1 {
   color: #047857;
 }
 
+.kind-pill.mtq {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
 html.dark .kind-pill.work {
   background: #3b2416;
   color: #fdba74;
@@ -141,6 +147,11 @@ html.dark .kind-pill.work {
 html.dark .kind-pill.avis {
   background: #14532d;
   color: #6ee7b7;
+}
+
+html.dark .kind-pill.mtq {
+  background: #3b0764;
+  color: #c4b5fd;
 }
 
 .notice-link {
@@ -154,6 +165,17 @@ html.dark .notice-link { color: #6ee7b7; }
 
 .site-list button.avis-item.active { background: #ecfdf5; }
 html.dark .site-list button.avis-item.active { background: #14532d; }
+.site-list button.mtq-item.active { background: #f5f3ff; }
+html.dark .site-list button.mtq-item.active { background: #3b0764; }
+
+.mtq-description {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.notice-link.mtq-link { color: #6d28d9; }
+html.dark .notice-link.mtq-link { color: #c4b5fd; }
 
 .lang {
   display: flex;

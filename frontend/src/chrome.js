@@ -210,7 +210,7 @@ export function Header({ lang, setLang }) {
   );
 }
 
-export function Footer({ lang, importedAt, avisImportedAt, formatImport }) {
+export function Footer({ lang, importedAt, avisImportedAt, mtqImportedAt, formatImport }) {
   const copy = COPY[lang];
   return (
     <footer className="site-footer">
@@ -228,12 +228,17 @@ export function Footer({ lang, importedAt, avisImportedAt, formatImport }) {
       <p className="footer-data">
         {formatImport(importedAt, lang, copy.importedWorks)}
         {avisImportedAt ? ` · ${formatImport(avisImportedAt, lang, copy.importedAvis)}` : ""}
+        {mtqImportedAt ? ` · ${formatImport(mtqImportedAt, lang, copy.importedMtq)}` : ""}
         {" · "}
         <a href="https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d">{copy.datasetWorks}</a>
         {" · "}
         <a href="https://donnees.montreal.ca/dataset/avis-alertes">{copy.datasetAvis}</a>
         {" · "}
         <a href="https://montreal.ca/avis-et-alertes">{copy.avisHuman}</a>
+        {" · "}
+        <a href="https://www.donneesquebec.ca/recherche/dataset/travaux-routiers">{copy.datasetMtq}</a>
+        {" · "}
+        <a href="https://www.quebec511.info">{copy.mtqHuman}</a>
         {" · "}
         <a href="https://creativecommons.org/licenses/by/4.0/">CC-BY 4.0</a>
         {" · "}

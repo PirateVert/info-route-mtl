@@ -10,6 +10,7 @@ import {
   formatDistance,
   formatImport,
   geoErrorKey,
+  mtqDescription,
   readLang,
   reasonLabel,
   scheduleText,
@@ -51,17 +52,18 @@ function SiteList({ items, selectedId, onSelect, copy, lang, search = false }) {
     <ul className="site-list">
       {items.map((work) => {
         const avis = work.kind === "avis";
+        const mtq = work.kind === "mtq";
         return (
           <li key={work.id}>
             <button
               type="button"
-              className={`${work.id === selectedId ? "active" : ""} ${avis ? "avis-item" : ""}`.trim()}
+              className={`${work.id === selectedId ? "active" : ""} ${avis ? "avis-item" : ""} ${mtq ? "mtq-item" : ""}`.trim()}
               onClick={() => onSelect(work)}
             >
               <span className="street">{work.title || work.street || copy.unknown}</span>
               <span className="meta">
-                {avis ? `${copy.kindAvis} · ` : ""}
-                {work.borough}
+                {avis ? `${copy.kindAvis} · ` : mtq ? `${copy.kindMtq} · ` : ""}
+                {work.borough || (mtq ? copy.kindMtq : "")}
                 {search && work.match
                   ? ` · ${work.match === "street" ? copy.streetMatch : copy.nearbyMatch}`
                   : ""}
@@ -86,8 +88,10 @@ export default function App() {
   const [boroughs, setBoroughs] = useState([]);
   const [importedAt, setImportedAt] = useState("");
   const [avisImportedAt, setAvisImportedAt] = useState("");
+  const [mtqImportedAt, setMtqImportedAt] = useState("");
   const [works, setWorks] = useState([]);
   const [avis, setAvis] = useState([]);
+  const [mtq, setMtq] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [kind, setKind] = useState("street");
@@ -114,6 +118,7 @@ export default function App() {
         setBoroughs((data.boroughs || []).map((item) => item.name));
         setImportedAt(data.imported_at || "");
         setAvisImportedAt(data.avis?.imported_at || "");
+        setMtqImportedAt(data.mtq?.imported_at || "");
       })
       .catch(() => {
         if (!cancel) setError("loadError");
@@ -129,14 +134,17 @@ export default function App() {
     setError("");
     const worksPath = borough ? `/api/works?borough=${encodeURIComponent(borough)}` : "/api/works";
     const avisPath = borough ? `/api/avis?borough=${encodeURIComponent(borough)}` : "/api/avis";
+    const mtqPath = borough ? `/api/mtq?borough=${encodeURIComponent(borough)}` : "/api/mtq";
     Promise.all([
       getJson(worksPath),
       getJson(avisPath).catch(() => ({ avis: [] })),
+      getJson(mtqPath).catch(() => ({ mtq: [] })),
     ])
-      .then(([workData, avisData]) => {
+      .then(([workData, avisData, mtqData]) => {
         if (cancel) return;
         setWorks(workData.works || []);
         setAvis(avisData.avis || []);
+        setMtq(mtqData.mtq || []);
         setLoading(false);
       })
       .catch(() => {
@@ -233,12 +241,14 @@ export default function App() {
     () => [
       ...works.map((work) => ({ ...work, kind: work.kind || "work" })),
       ...avis.map((item) => ({ ...item, kind: "avis" })),
+      ...mtq.map((item) => ({ ...item, kind: "mtq" })),
     ],
-    [works, avis]
+    [works, avis, mtq]
   );
   const shown = search ? search.results || [] : layered;
-  const workCount = shown.filter((item) => item.kind !== "avis").length;
+  const workCount = shown.filter((item) => item.kind !== "avis" && item.kind !== "mtq").length;
   const avisCount = shown.filter((item) => item.kind === "avis").length;
+  const mtqCount = shown.filter((item) => item.kind === "mtq").length;
   const selected = useMemo(
     () => shown.find((work) => work.id === selectedId) || null,
     [shown, selectedId]
@@ -260,7 +270,7 @@ export default function App() {
   }, [search]);
   const fitToken = search
     ? `search:${search.type || ""}:${search.query}:${search.via || ""}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.end_lat || ""}:${search.place?.source || ""}`
-    : `borough:${borough}:w${works.length}:a${avis.length}`;
+    : `borough:${borough}:w${works.length}:a${avis.length}:m${mtq.length}`;
 
   const boroughOptions = useMemo(() => {
     const names = new Set(boroughs);
@@ -355,7 +365,7 @@ export default function App() {
             </option>
           ))}
         </select>
-        <p className="count">{loading ? copy.loading : copy.layerCount({ works: workCount, avis: avisCount })}</p>
+        <p className="count">{loading ? copy.loading : copy.layerCount({ works: workCount, avis: avisCount, mtq: mtqCount })}</p>
         {search && (
           <button type="button" className="text-button" onClick={clearSearch}>
             {copy.clearSearch}
@@ -378,6 +388,7 @@ export default function App() {
           <p className="legend">
             <span><i className="swatch work" /> {copy.legendWork}</span>
             <span><i className="swatch avis" /> {copy.legendAvis}</span>
+            <span><i className="swatch mtq" /> {copy.legendMtq}</span>
           </p>
         </div>
 
@@ -391,12 +402,53 @@ export default function App() {
 
           {selected ? (
             <article className="detail" id="site-detail">
-              <p className={`kind-pill ${selected.kind === "avis" ? "avis" : "work"}`}>
-                {selected.kind === "avis" ? copy.kindAvis : copy.kindWork}
+              <p className={`kind-pill ${selected.kind === "avis" ? "avis" : selected.kind === "mtq" ? "mtq" : "work"}`}>
+                {selected.kind === "avis" ? copy.kindAvis : selected.kind === "mtq" ? copy.kindMtq : copy.kindWork}
               </p>
               <h2>{selected.title || selected.street || copy.unknown}</h2>
               <p className="borough-name">{selected.borough}</p>
-              {selected.kind === "avis" ? (
+              {selected.kind === "mtq" ? (
+                <>
+                  <dl>
+                    {selected.localisation && (
+                      <div>
+                        <dt>{copy.mtqWhere}</dt>
+                        <dd>{selected.localisation}</dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt>{copy.dates}</dt>
+                      <dd>{dateRangeText(selected, lang)}</dd>
+                    </div>
+                    {selected.lanes && (
+                      <div>
+                        <dt>{copy.mtqLanes}</dt>
+                        <dd>{selected.lanes}</dd>
+                      </div>
+                    )}
+                    {selected.detour && (
+                      <div>
+                        <dt>{copy.mtqDetour}</dt>
+                        <dd>{selected.detour}</dd>
+                      </div>
+                    )}
+                    {selected.direction && (
+                      <div>
+                        <dt>{copy.mtqDirection}</dt>
+                        <dd>{selected.direction}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {mtqDescription(selected, lang) && (
+                    <p className="mtq-description">{mtqDescription(selected, lang)}</p>
+                  )}
+                  {selected.url && (
+                    <a className="notice-link mtq-link" href={selected.url} target="_blank" rel="noreferrer">
+                      {copy.mtqLink}
+                    </a>
+                  )}
+                </>
+              ) : selected.kind === "avis" ? (
                 <>
                   <dl>
                     <div>
@@ -460,6 +512,13 @@ export default function App() {
               ) : (
                 <SiteList items={avis} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               )}
+              <h3>{copy.mtqTitle}</h3>
+              <p className="hint">{copy.mtqHint}</p>
+              {mtq.length === 0 ? (
+                <p className="hint">{copy.mtqEmpty}</p>
+              ) : (
+                <SiteList items={mtq} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+              )}
             </>
           )}
         </section>
@@ -468,7 +527,7 @@ export default function App() {
       </>
       )}
     </main>
-    <Footer lang={lang} importedAt={importedAt} avisImportedAt={avisImportedAt} formatImport={formatImport} />
+    <Footer lang={lang} importedAt={importedAt} avisImportedAt={avisImportedAt} mtqImportedAt={mtqImportedAt} formatImport={formatImport} />
     </>
   );
 }

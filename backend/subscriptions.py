@@ -299,7 +299,7 @@ def _match_place(works: list[dict], place: dict) -> list[dict]:
 def _scope(borough: str, street: str = "", places: list[dict] | None = None) -> list[dict]:
     import server
 
-    works = [*server.all_works(), *server.all_avis()]
+    works = server.all_sites()
     if borough:
         works = [work for work in works if work["borough"] == borough]
     cleaned = places if places is not None else _clean_places([], street)
@@ -331,7 +331,7 @@ def ensure_snapshot() -> None:
     import server
 
     try:
-        works = server.all_works()
+        works = [*server.all_works(), *server.all_mtq()]
     except HTTPException:
         return
     payload = {work["id"]: _fingerprint(work) for work in works if work.get("id")}

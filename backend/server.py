@@ -1,4 +1,4 @@
-"""Info-Route MTL API. Reads stores written by import_roadwork.py and import_avis.py."""
+"""Info-Route MTL API. Reads stores written by the daily import scripts."""
 
 from __future__ import annotations
 
@@ -35,12 +35,15 @@ _load_env(ROOT / ".env")
 
 STORE_PATH = ROOT / "data" / "roadwork.json"
 AVIS_PATH = ROOT / "data" / "avis.json"
+MTQ_PATH = ROOT / "data" / "mtq.json"
 FRONTEND_BUILD = ROOT.parent / "frontend" / "build"
 BOROUGH_FIELD = "boroughid"
 MHM = "Mercier-Hochelaga-Maisonneuve"
 ROADWORK_PAGE = "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d"
 AVIS_PAGE = "https://donnees.montreal.ca/dataset/avis-alertes"
 AVIS_HUMAN_URL = "https://montreal.ca/avis-et-alertes"
+MTQ_PAGE = "https://www.donneesquebec.ca/recherche/dataset/travaux-routiers"
+MTQ_HUMAN_URL = "https://www.quebec511.info"
 LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
 DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 NOMINATIM_UA = "Info-Route MTL/1.0 (citizen roadwork map; Montreal)"
@@ -65,6 +68,7 @@ app.add_middleware(
 
 _cache: dict = {"mtime": None, "data": None}
 _avis_cache: dict = {"mtime": None, "data": None}
+_mtq_cache: dict = {"mtime": None, "data": None}
 _geocode_cache: dict[str, dict | None] = {}
 
 
@@ -103,6 +107,29 @@ def load_avis_store() -> dict:
         _avis_cache["data"] = json.loads(AVIS_PATH.read_text(encoding="utf-8"))
         _avis_cache["mtime"] = mtime
     return _avis_cache["data"] or empty
+
+
+def load_mtq_store() -> dict:
+    empty = {
+        "imported_at": None,
+        "source_url": None,
+        "source_page": MTQ_PAGE,
+        "human_url": MTQ_HUMAN_URL,
+        "license": "CC-BY-4.0",
+        "count": 0,
+        "note": (
+            "Québec 511 / Transports Québec highway, tunnel, and bridge lane closures "
+            "on Montréal island and its approaches. Not City streets."
+        ),
+        "rows": [],
+    }
+    if not MTQ_PATH.is_file():
+        return empty
+    mtime = MTQ_PATH.stat().st_mtime
+    if _mtq_cache["mtime"] != mtime:
+        _mtq_cache["data"] = json.loads(MTQ_PATH.read_text(encoding="utf-8"))
+        _mtq_cache["mtime"] = mtime
+    return _mtq_cache["data"] or empty
 
 
 def _float(value: str | None) -> float | None:
@@ -163,8 +190,49 @@ def all_works() -> list[dict]:
     return [project(row) for row in load_store().get("rows", [])]
 
 
+def project_mtq(row: dict) -> dict:
+    title = row.get("title") or ""
+    localisation = row.get("localisation") or ""
+    work = row.get("work") or ""
+    route = row.get("route") or ""
+    lat = row.get("lat")
+    lng = row.get("lng")
+    street = " ".join(part for part in (route, localisation, work, title) if part)
+    return {
+        "id": row.get("id") or "",
+        "kind": "mtq",
+        "title": title,
+        "street": street,
+        "borough": row.get("borough") or "",
+        "route": route,
+        "work": work,
+        "localisation": localisation,
+        "direction": row.get("direction") or "",
+        "restriction": row.get("restriction") or "",
+        "lanes": row.get("lanes") or "",
+        "detour": row.get("detour") or "",
+        "description_fr": row.get("description_fr") or "",
+        "description_en": row.get("description_en") or "",
+        "start": row.get("start") or "",
+        "end": row.get("end") or "",
+        "url": row.get("url") or MTQ_HUMAN_URL,
+        "lat": lat if isinstance(lat, (int, float)) else _float(lat),
+        "lng": lng if isinstance(lng, (int, float)) else _float(lng),
+        "geometry": row.get("geometry") or None,
+        "geometry_type": row.get("geometry_type") or "",
+    }
+
+
 def all_avis() -> list[dict]:
     return [project_avis(row) for row in load_avis_store().get("rows", [])]
+
+
+def all_mtq() -> list[dict]:
+    return [project_mtq(row) for row in load_mtq_store().get("rows", [])]
+
+
+def all_sites() -> list[dict]:
+    return [*all_works(), *all_avis(), *all_mtq()]
 
 
 def fold(text: str) -> str:
@@ -260,7 +328,7 @@ def with_distance(work: dict, place: dict | None) -> dict:
 
 def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list[dict]:
     results: dict[str, dict] = {}
-    for work in [*all_works(), *all_avis()]:
+    for work in all_sites():
         street_hit = False
         if tokens:
             folded_street = fold(work.get("street") or work.get("title") or "")
@@ -361,6 +429,7 @@ def health():
         "service": "info-route-mtl",
         "data_ready": store_ok,
         "avis_ready": AVIS_PATH.is_file(),
+        "mtq_ready": MTQ_PATH.is_file(),
     }
 
 
@@ -368,6 +437,7 @@ def health():
 def meta():
     store = load_store()
     avis = load_avis_store()
+    mtq = load_mtq_store()
     counts = Counter((row.get(BOROUGH_FIELD) or "") for row in store.get("rows", []))
     boroughs = [
         {"name": name, "count": count}
@@ -385,6 +455,17 @@ def meta():
         "types": avis.get("types") or ["Circulation et transport", "Stationnement"],
         "note": avis.get("note"),
     }
+    mtq_meta = {
+        "imported_at": mtq.get("imported_at"),
+        "count": mtq.get("count", 0),
+        "province_count": mtq.get("province_count"),
+        "source_url": mtq.get("source_url"),
+        "source_page": mtq.get("source_page", MTQ_PAGE),
+        "human_url": mtq.get("human_url", MTQ_HUMAN_URL),
+        "license": mtq.get("license", "CC-BY-4.0"),
+        "license_url": LICENSE_URL,
+        "note": mtq.get("note"),
+    }
     return {
         "imported_at": store.get("imported_at"),
         "count": store.get("count", 0),
@@ -396,6 +477,7 @@ def meta():
         "license_url": LICENSE_URL,
         "attribution": "Ville de Montréal",
         "avis": avis_meta,
+        "mtq": mtq_meta,
         "sources": [
             {
                 "id": "roadwork",
@@ -421,6 +503,19 @@ def meta():
                 "count": avis_meta["count"],
                 "note": avis_meta["note"],
             },
+            {
+                "id": "mtq",
+                "name": "Travaux routiers (Québec 511)",
+                "url": mtq_meta["source_url"],
+                "page": mtq_meta["source_page"],
+                "human_url": mtq_meta["human_url"],
+                "license": mtq_meta["license"],
+                "license_url": LICENSE_URL,
+                "attribution": "Transports Québec / Québec 511",
+                "imported_at": mtq_meta["imported_at"],
+                "count": mtq_meta["count"],
+                "note": mtq_meta["note"],
+            },
         ],
     }
 
@@ -441,6 +536,24 @@ def avis(borough: str | None = None):
         "types": store.get("types") or ["Circulation et transport", "Stationnement"],
         "note": store.get("note"),
         "avis": rows,
+    }
+
+
+@app.get("/api/mtq")
+def mtq(borough: str | None = None):
+    rows = all_mtq()
+    if borough:
+        rows = [row for row in rows if row["borough"] == borough]
+    store = load_mtq_store()
+    return {
+        "count": len(rows),
+        "borough": borough or "",
+        "imported_at": store.get("imported_at"),
+        "source_page": store.get("source_page", MTQ_PAGE),
+        "human_url": store.get("human_url", MTQ_HUMAN_URL),
+        "license": store.get("license", "CC-BY-4.0"),
+        "note": store.get("note"),
+        "mtq": rows,
     }
 
 
@@ -511,7 +624,7 @@ def search(
         if kind not in PLACE_TYPES:
             raise HTTPException(status_code=400, detail="bad_place")
         cleaned = _clean_place({"type": kind, "query": query, "via": via_text})
-        matched = _match_place([*all_works(), *all_avis()], cleaned)
+        matched = _match_place(all_sites(), cleaned)
         geom = place_geometry(cleaned)
         radius_m = {
             "street": NEARBY_RADIUS_M,
