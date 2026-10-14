@@ -67,6 +67,23 @@ function Moon() {
   );
 }
 
+export function BackToMap({ lang }) {
+  const copy = COPY[lang];
+  return (
+    <a
+      className="back-to-map"
+      href="/"
+      data-testid="back-to-map"
+      onClick={(event) => {
+        event.preventDefault();
+        navigate("/");
+      }}
+    >
+      {copy.backToMap}
+    </a>
+  );
+}
+
 export function Header({ lang, setLang }) {
   const copy = COPY[lang];
   const [theme, setTheme] = useState(readTheme);

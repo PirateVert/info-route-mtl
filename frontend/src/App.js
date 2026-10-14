@@ -17,6 +17,8 @@ import {
   whoText,
 } from "./i18n";
 
+const PLACE_TYPES = ["route", "street", "address", "intersection", "near_me"];
+
 async function getJson(path) {
   const base = process.env.REACT_APP_BACKEND_URL || "";
   const response = await fetch(`${base}${path}`);
@@ -39,6 +41,7 @@ async function getJson(path) {
 function errorMessage(copy, error) {
   if (!error) return copy.loadError;
   if (error.detail === "outside_montreal" || error.detail === "bad_coords") return copy.geoOutside;
+  if (error.detail === "place_not_found") return copy.placeNotFound;
   if (copy[error]) return copy[error];
   return copy.loadError;
 }
@@ -87,11 +90,16 @@ export default function App() {
   const [avis, setAvis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [kind, setKind] = useState("street");
   const [query, setQuery] = useState("");
+  const [via, setVia] = useState("");
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [search, setSearch] = useState(null);
   const [selectedId, setSelectedId] = useState("");
+  const needsVia = kind === "route" || kind === "intersection";
+  const isNearMe = kind === "near_me";
+  const placeCopy = copy.subscribe;
 
   useEffect(() => {
     document.documentElement.lang = lang === "en" ? "en" : "fr";
@@ -155,7 +163,7 @@ export default function App() {
   }
 
   async function runCoordSearch(lat, lng) {
-    const data = await getJson(`/api/search?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+    const data = await getJson(`/api/search?type=near_me&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
     setSearch(data);
     setSelectedId("");
   }
@@ -163,15 +171,19 @@ export default function App() {
   async function onSearch(event) {
     event.preventDefault();
     const text = query.trim();
-    if (!text) return;
+    const viaText = via.trim();
+    if (isNearMe || !text) return;
+    if (needsVia && !viaText) return;
     setSearching(true);
     setError("");
     try {
-      const data = await getJson(`/api/search?q=${encodeURIComponent(text)}`);
+      const params = new URLSearchParams({ q: text, type: kind });
+      if (viaText) params.set("via", viaText);
+      const data = await getJson(`/api/search?${params.toString()}`);
       setSearch(data);
       setSelectedId("");
     } catch (err) {
-      setError("loadError");
+      setError(err.detail === "place_not_found" ? "placeNotFound" : err.detail === "outside_montreal" || err.detail === "bad_coords" ? "geoOutside" : "loadError");
     } finally {
       setSearching(false);
     }
@@ -208,7 +220,13 @@ export default function App() {
   function clearSearch() {
     setSearch(null);
     setQuery("");
+    setVia("");
     setSelectedId("");
+  }
+
+  function changeKind(next) {
+    setKind(next);
+    if (next !== "route" && next !== "intersection") setVia("");
   }
 
   const layered = useMemo(
@@ -229,8 +247,19 @@ export default function App() {
     if (search?.place?.source !== "coords") return null;
     return { lat: search.place.lat, lng: search.place.lng, label: copy.youAreHere };
   }, [search, copy.youAreHere]);
+  const focusPoints = useMemo(() => {
+    if (!search?.place) return [];
+    const points = [];
+    if (Number.isFinite(search.place.lat) && Number.isFinite(search.place.lng)) {
+      points.push({ lat: search.place.lat, lng: search.place.lng });
+    }
+    if (Number.isFinite(search.place.end_lat) && Number.isFinite(search.place.end_lng)) {
+      points.push({ lat: search.place.end_lat, lng: search.place.end_lng });
+    }
+    return points;
+  }, [search]);
   const fitToken = search
-    ? `search:${search.query}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.source || ""}`
+    ? `search:${search.type || ""}:${search.query}:${search.via || ""}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.end_lat || ""}:${search.place?.source || ""}`
     : `borough:${borough}:w${works.length}:a${avis.length}`;
 
   const boroughOptions = useMemo(() => {
@@ -252,18 +281,19 @@ export default function App() {
       <p className="disclaimer">{copy.disclaimer}</p>
 
       <form className="search" onSubmit={onSearch}>
-        <label htmlFor="street-search">{copy.searchLabel}</label>
-        <div className="search-row">
-          <input
-            id="street-search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={copy.searchPlaceholder}
-            autoComplete="off"
-          />
-          <button type="submit" className="search-go" disabled={searching}>
-            {searching && !locating ? copy.searching : copy.searchButton}
-          </button>
+        <p className="search-lead">{copy.searchLabel}</p>
+        <label htmlFor="map-search-type">{copy.searchKind}</label>
+        <select
+          id="map-search-type"
+          value={kind}
+          onChange={(event) => changeKind(event.target.value)}
+        >
+          {PLACE_TYPES.map((item) => (
+            <option key={item} value={item}>{placeCopy.placeType[item]}</option>
+          ))}
+        </select>
+        <p className="hint">{copy.searchHelp}</p>
+        {isNearMe ? (
           <button
             type="button"
             className="locate-button"
@@ -272,7 +302,39 @@ export default function App() {
           >
             {locating ? copy.locating : copy.useMyLocation}
           </button>
-        </div>
+        ) : (
+          <div className="search-fields">
+            <label htmlFor="map-search-query">{placeCopy.placeQuery[kind]}</label>
+            <input
+              id="map-search-query"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={placeCopy.placePlaceholder[kind]}
+              autoComplete="off"
+            />
+            {needsVia && (
+              <>
+                <label htmlFor="map-search-via">{placeCopy.placeVia[kind]}</label>
+                <input
+                  id="map-search-via"
+                  value={via}
+                  onChange={(event) => setVia(event.target.value)}
+                  placeholder={placeCopy.placeViaPlaceholder[kind]}
+                  autoComplete="off"
+                />
+              </>
+            )}
+            <div className="search-row">
+              <button
+                type="submit"
+                className="search-go"
+                disabled={searching || !query.trim() || (needsVia && !via.trim())}
+              >
+                {searching && !locating ? copy.searching : copy.searchButton}
+              </button>
+            </div>
+          </div>
+        )}
       </form>
 
       <div className="filters">
@@ -311,6 +373,7 @@ export default function App() {
             onSelect={selectWork}
             fitToken={fitToken}
             here={here}
+            focusPoints={focusPoints}
           />
           <p className="legend">
             <span><i className="swatch work" /> {copy.legendWork}</span>
@@ -322,7 +385,7 @@ export default function App() {
           {here && <p className="place here-hint">{copy.youAreHere}</p>}
           {search?.place && !here && (
             <p className="place">
-              {copy.placeFound} : {search.place.label}
+              {copy.placeFound}{lang === "fr" ? " : " : ": "}{search.place.label}
             </p>
           )}
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { COPY, MHM, reasonLabel } from "./i18n";
-import { navigate } from "./chrome";
+import { BackToMap, navigate } from "./chrome";
 
 const ALERT_KEYS = ["new", "ending", "dates", "status", "who", "reason"];
 const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"];
@@ -35,10 +35,17 @@ function errorText(copy, error) {
 export default function Subscribe({ lang }) {
   const copy = COPY[lang].subscribe;
   const path = window.location.pathname;
-  if (path.startsWith("/subscribe/success")) return <Success lang={lang} />;
-  if (path.startsWith("/subscribe/cancel")) return <Cancel lang={lang} />;
-  if (path.startsWith("/subscribe/manage")) return <Manage lang={lang} />;
-  return <Signup lang={lang} copy={copy} />;
+  let screen;
+  if (path.startsWith("/subscribe/success")) screen = <Success lang={lang} />;
+  else if (path.startsWith("/subscribe/cancel")) screen = <Cancel lang={lang} />;
+  else if (path.startsWith("/subscribe/manage")) screen = <Manage lang={lang} />;
+  else screen = <Signup lang={lang} copy={copy} />;
+  return (
+    <>
+      <BackToMap lang={lang} />
+      {screen}
+    </>
+  );
 }
 
 function PlacesEditor({ copy, places, setPlaces, setError }) {

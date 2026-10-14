@@ -288,6 +288,70 @@ def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list
     )
 
 
+def _sort_search_results(rows: list[dict]) -> list[dict]:
+    return sorted(
+        rows,
+        key=lambda item: (
+            item["distance_m"] is None,
+            item["distance_m"] if item["distance_m"] is not None else 10**9,
+            item.get("street") or item.get("title") or "",
+        ),
+    )[:40]
+
+
+def place_geometry(cleaned: dict) -> dict:
+    """Map focus for a subscriber place. Geocode is cached; matching stays in subscriptions._match_place."""
+    kind = cleaned["type"]
+    query = cleaned["query"]
+    via = cleaned["via"]
+    if kind == "near_me":
+        point = parse_coord_pair(query)
+        if not point:
+            return {"label": via or query, "source": "coords"}
+        return {"label": via or query, "lat": point["lat"], "lng": point["lng"], "source": "coords"}
+    if kind == "intersection":
+        payload = {"label": f"{query} × {via}", "source": "intersection"}
+        point = geocode(f"{query} et {via}")
+        if point:
+            payload["lat"] = point["lat"]
+            payload["lng"] = point["lng"]
+        return payload
+    if kind == "route":
+        payload = {"label": f"{query} → {via}", "source": "route"}
+        start = geocode(query)
+        end = geocode(via)
+        if start:
+            payload["lat"] = start["lat"]
+            payload["lng"] = start["lng"]
+        if end:
+            payload["end_lat"] = end["lat"]
+            payload["end_lng"] = end["lng"]
+        return payload
+    payload = {"label": query, "source": kind}
+    point = geocode(query)
+    if point:
+        payload["lat"] = point["lat"]
+        payload["lng"] = point["lng"]
+        payload["label"] = point.get("label") or query
+    return payload
+
+
+def annotate_place_matches(works: list[dict], geom: dict | None, query: str, via: str = "") -> list[dict]:
+    tokens = street_tokens(query)
+    via_tokens = street_tokens(via) if via else []
+    point = geom if geom and geom.get("lat") is not None and geom.get("lng") is not None else None
+    rows = []
+    for work in works:
+        item = with_distance(work, point)
+        folded = fold(work.get("street") or work.get("title") or "")
+        street_hit = bool(tokens) and all(token in folded for token in tokens)
+        if via_tokens and all(token in folded for token in via_tokens):
+            street_hit = True
+        item["match"] = "street" if street_hit else "nearby"
+        rows.append(item)
+    return _sort_search_results(rows)
+
+
 @app.get("/api")
 @app.get("/api/")
 def health():
@@ -396,16 +460,20 @@ def works(borough: str | None = None):
 @app.get("/api/search")
 def search(
     q: str | None = Query(None, max_length=200),
+    via: str | None = Query(None, max_length=200),
+    place_type: str | None = Query(None, alias="type", max_length=20),
     lat: float | None = Query(None),
     lng: float | None = Query(None),
 ):
     query = (q or "").strip()
+    via_text = (via or "").strip()
+    kind = (place_type or "").strip()
     from_coords = lat is not None or lng is not None
     place = None
     tokens: list[str] = []
     radius_m = NEARBY_RADIUS_M
 
-    if from_coords:
+    if kind == "near_me" or (not kind and from_coords):
         if lat is None or lng is None:
             raise HTTPException(status_code=400, detail="bad_coords")
         if not in_montreal(lat, lng):
@@ -416,17 +484,59 @@ def search(
             "lng": lng,
             "source": "coords",
         }
-    elif query:
+        ordered = search_works(place, tokens, radius_m)
+        if not ordered:
+            radius_m = NEARBY_FALLBACK_RADIUS_M
+            ordered = search_works(place, tokens, radius_m)
+        return {
+            "query": query,
+            "via": "",
+            "type": "near_me" if kind == "near_me" else "",
+            "place": place,
+            "radius_m": radius_m,
+            "count": len(ordered[:40]),
+            "results": ordered[:40],
+        }
+
+    if kind:
+        from subscriptions import (
+            ADDRESS_RADIUS_M,
+            INTERSECTION_RADIUS_M,
+            PLACE_TYPES,
+            ROUTE_RADIUS_M,
+            _clean_place,
+            _match_place,
+        )
+
+        if kind not in PLACE_TYPES:
+            raise HTTPException(status_code=400, detail="bad_place")
+        cleaned = _clean_place({"type": kind, "query": query, "via": via_text})
+        matched = _match_place([*all_works(), *all_avis()], cleaned)
+        geom = place_geometry(cleaned)
+        radius_m = {
+            "street": NEARBY_RADIUS_M,
+            "address": ADDRESS_RADIUS_M,
+            "intersection": INTERSECTION_RADIUS_M,
+            "route": ROUTE_RADIUS_M,
+        }.get(kind, NEARBY_RADIUS_M)
+        ordered = annotate_place_matches(matched, geom, cleaned["query"], cleaned["via"])
+        return {
+            "query": cleaned["query"],
+            "via": cleaned["via"],
+            "type": kind,
+            "place": geom,
+            "radius_m": radius_m,
+            "count": len(ordered),
+            "results": ordered,
+        }
+
+    if query:
         place = geocode(query)
         tokens = street_tokens(query)
     else:
         raise HTTPException(status_code=400, detail="Empty query")
 
     ordered = search_works(place, tokens, radius_m)
-    if from_coords and not ordered:
-        radius_m = NEARBY_FALLBACK_RADIUS_M
-        ordered = search_works(place, tokens, radius_m)
-
     return {
         "query": query,
         "place": place,

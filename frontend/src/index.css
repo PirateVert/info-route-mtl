@@ -13,6 +13,7 @@ html.dark {
 html.dark body { background: var(--paper); }
 
 html.dark .search input,
+html.dark .search select,
 html.dark .filters select,
 html.dark .subscribe input,
 html.dark .subscribe select,
@@ -196,7 +197,38 @@ html.dark .site-list button.avis-item.active { background: #14532d; }
   width: auto;
 }
 
+.search {
+  margin-top: 16px;
+}
+
+.search-lead {
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.search > .locate-button {
+  margin-top: 8px;
+}
+
+.search select {
+  width: 100%;
+  max-width: 360px;
+}
+
+.search-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.search-fields label {
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+
 .search input,
+.search select,
 .filters select {
   width: 100%;
   min-height: 52px;
@@ -527,6 +559,17 @@ html.dark .site-footer a { color: #6ee7b7; }
   max-width: 1180px;
   margin: 8px auto 0;
 }
+
+.back-to-map {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 16px;
+  color: #047857;
+  font-weight: 700;
+  text-decoration: none;
+}
+.back-to-map:hover { text-decoration: underline; }
+html.dark .back-to-map { color: #6ee7b7; }
 
 .subscribe h1 { font-size: 2rem; }
 .subscribe-grid { display: grid; gap: 16px; }

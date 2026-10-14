@@ -4,7 +4,7 @@ import L from "leaflet";
 
 const MHM_CENTER = [45.571, -73.5352];
 
-function MapFocus({ works, selectedId, fitToken, here }) {
+function MapFocus({ works, selectedId, fitToken, here, focusPoints }) {
   const map = useMap();
 
   useEffect(() => {
@@ -17,6 +17,11 @@ function MapFocus({ works, selectedId, fitToken, here }) {
     if (here && Number.isFinite(here.lat) && Number.isFinite(here.lng)) {
       points.push(here);
     }
+    (focusPoints || []).forEach((point) => {
+      if (point && Number.isFinite(point.lat) && Number.isFinite(point.lng)) {
+        points.push(point);
+      }
+    });
     if (!points.length) return;
     map.invalidateSize();
     if (points.length === 1) {
@@ -25,7 +30,7 @@ function MapFocus({ works, selectedId, fitToken, here }) {
     }
     const bounds = L.latLngBounds(points.map((work) => [work.lat, work.lng]));
     map.fitBounds(bounds.pad(0.12), { maxZoom: 15, animate: false });
-  }, [fitToken, works, map, here]);
+  }, [fitToken, works, map, here, focusPoints]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -37,7 +42,7 @@ function MapFocus({ works, selectedId, fitToken, here }) {
   return null;
 }
 
-export default function WorkMap({ works, selectedId, onSelect, fitToken, here }) {
+export default function WorkMap({ works, selectedId, onSelect, fitToken, here, focusPoints }) {
   const markers = useMemo(
     () => works.filter((work) => Number.isFinite(work.lat) && Number.isFinite(work.lng)),
     [works]
@@ -55,7 +60,7 @@ export default function WorkMap({ works, selectedId, onSelect, fitToken, here })
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <MapFocus works={markers} selectedId={selectedId} fitToken={fitToken} here={here} />
+      <MapFocus works={markers} selectedId={selectedId} fitToken={fitToken} here={here} focusPoints={focusPoints} />
       {here && Number.isFinite(here.lat) && Number.isFinite(here.lng) && (
         <CircleMarker
           center={[here.lat, here.lng]}
