@@ -58,9 +58,10 @@ const WEEKDAYS = {
 export const COPY = {
   fr: {
     title: "Info-Route MTL",
-    tagline: "Travaux routiers et avis officiels de circulation ou de stationnement, en langage clair.",
+    tagline:
+      "Travaux de la Ville, avis officiels de circulation ou de stationnement, et chantiers d'autoroutes du Québec 511, en langage clair.",
     disclaimer:
-      "Les avis viennent du site de la Ville. Ce n'est pas un inventaire complet des manifestations, fêtes ou fermetures ponctuelles.",
+      "Les avis viennent du site de la Ville : ce n'est pas un inventaire complet des manifestations, fêtes ou fermetures ponctuelles. Les points violets sont des autoroutes, tunnels et ponts du ministère des Transports — pas les rues locales.",
     searchLabel: "Qu'est-ce qui se passe sur ma rue?",
     searchKind: "Type de recherche",
     searchHelp: "Cherchez un trajet, une rue, une adresse, une intersection, ou votre position.",
@@ -71,7 +72,7 @@ export const COPY = {
     useMyLocation: "Utiliser ma position",
     locating: "Localisation…",
     youAreHere: "Vous êtes ici",
-    noResultsHere: "Aucun chantier ni avis à proximité de votre position.",
+    noResultsHere: "Aucun chantier, avis ni chantier MTQ à proximité de votre position.",
     geoDenied: "La localisation a été refusée. Autorisez-la dans le navigateur, ou tapez une adresse.",
     geoUnavailable: "Impossible d'obtenir votre position. Réessayez, ou tapez une adresse.",
     geoTimeout: "La localisation a pris trop de temps. Réessayez, ou tapez une adresse.",
@@ -80,34 +81,48 @@ export const COPY = {
     clearSearch: "Revenir à la carte de l'arrondissement",
     boroughLabel: "Arrondissement",
     allBoroughs: "Tous les arrondissements",
-    loading: "Chargement des chantiers et des avis…",
+    loading: "Chargement des chantiers, des avis et des autoroutes…",
     loadError: "Impossible de joindre le serveur pour le moment.",
     count: (n) => (n === 1 ? "1 chantier affiché" : `${n} chantiers affichés`),
-    layerCount: ({ works, avis }) => {
-      const workText = works === 1 ? "1 chantier" : `${works} chantiers`;
-      const avisText = avis === 1 ? "1 avis" : `${avis} avis`;
-      if (!works && !avis) return "Aucun chantier ni avis affiché";
-      if (!avis) return `${workText} affiché${works > 1 ? "s" : ""}`;
-      if (!works) return `${avisText} affiché${avis > 1 ? "s" : ""}`;
-      return `${workText} et ${avisText} affichés`;
+    layerCount: ({ works, avis, mtq = 0 }) => {
+      const parts = [];
+      if (works) parts.push(works === 1 ? "1 chantier" : `${works} chantiers`);
+      if (avis) parts.push(avis === 1 ? "1 avis" : `${avis} avis`);
+      if (mtq) parts.push(mtq === 1 ? "1 chantier MTQ" : `${mtq} chantiers MTQ`);
+      if (!parts.length) return "Aucun chantier, avis ni chantier MTQ affiché";
+      if (parts.length === 1) {
+        const n = works || avis || mtq;
+        return `${parts[0]} affiché${n > 1 ? "s" : ""}`;
+      }
+      return `${parts.slice(0, -1).join(", ")} et ${parts[parts.length - 1]} affichés`;
     },
-    clickHint: "Touchez un point orange (travaux) ou vert (avis) sur la carte, ou un nom dans la liste.",
-    listTitle: "Chantiers",
+    clickHint: "Touchez un point orange (Ville), vert (avis) ou violet (MTQ / 511) sur la carte, ou un nom dans la liste.",
+    listTitle: "Chantiers de la Ville",
     avisTitle: "Avis officiels",
     avisHint: "Avis de circulation ou de stationnement publiés par la Ville. Pas une liste complète des manifestations ou fêtes.",
     avisEmpty: "Aucun avis de circulation ou de stationnement pour cet arrondissement.",
+    mtqTitle: "Autoroutes Québec 511",
+    mtqHint: "Fermetures de voies sur les autoroutes, tunnels et ponts du ministère des Transports. Ce n'est pas le réseau de rues de la Ville.",
+    mtqEmpty: "Aucun chantier MTQ pour cet arrondissement. Les autoroutes sans arrondissement apparaissent dans Tous les arrondissements.",
+    mtqLink: "Voir sur Québec 511",
+    mtqLanes: "Voies",
+    mtqDetour: "Détour",
+    mtqDirection: "Direction",
+    mtqWhere: "Localisation",
     noticeLink: "Lire l'avis sur montreal.ca",
     noticeType: "Type",
-    legendWork: "Travaux",
+    legendWork: "Travaux de la Ville",
     legendAvis: "Avis officiels",
+    legendMtq: "MTQ / 511",
     kindWork: "Chantier",
     kindAvis: "Avis",
+    kindMtq: "MTQ / 511",
     avisType: {
       "Circulation et transport": "Circulation et transport",
       Stationnement: "Stationnement",
     },
     resultsTitle: "Résultats",
-    noResults: "Aucun chantier ni avis trouvé pour ce lieu.",
+    noResults: "Aucun chantier, avis ni chantier MTQ trouvé pour ce lieu.",
     placeFound: "Lieu repéré",
     streetMatch: "sur cette rue",
     nearbyMatch: "à proximité",
@@ -118,16 +133,19 @@ export const COPY = {
     unknown: "Non précisé",
     close: "Fermer le détail",
     footer:
-      "Application citoyenne indépendante — données : Ville de Montréal (CC-BY 4.0), travaux routiers et avis et alertes",
+      "Application citoyenne indépendante — données adaptées de la Ville de Montréal (travaux et avis) et de Transports Québec / Québec 511 (autoroutes), CC-BY 4.0",
     imported: "Dernière importation",
     importedWorks: "Travaux importés",
     importedAvis: "Avis importés",
+    importedMtq: "MTQ importé",
     importUnknown: "Dernière importation : pas encore disponible",
     langGroup: "Langue",
     dataset: "Jeu de données",
-    datasetWorks: "Travaux routiers",
+    datasetWorks: "Travaux de la Ville",
     datasetAvis: "Avis et alertes",
+    datasetMtq: "Travaux routiers MTQ",
     avisHuman: "Avis de la Ville",
+    mtqHuman: "Québec 511",
     navMap: "Carte",
     backToMap: "← Carte",
     navSubscribe: "Abonnement",
@@ -243,9 +261,10 @@ export const COPY = {
   },
   en: {
     title: "Info-Route MTL",
-    tagline: "Current roadwork and official traffic or parking notices, in plain language.",
+    tagline:
+      "City roadwork, official traffic or parking notices, and Québec 511 highway closures, in plain language.",
     disclaimer:
-      "Notices come from the City site. This is not a complete list of demonstrations, parties, or one-off closures.",
+      "Notices come from the City site: this is not a complete list of demonstrations, parties, or one-off closures. Purple marks are ministry highways, tunnels, and bridges — not local streets.",
     searchLabel: "What's happening on my street?",
     searchKind: "Search type",
     searchHelp: "Search a route, street, address, intersection, or your location.",
@@ -256,7 +275,7 @@ export const COPY = {
     useMyLocation: "Use my location",
     locating: "Locating…",
     youAreHere: "You are here",
-    noResultsHere: "No work sites or notices near your location.",
+    noResultsHere: "No City work, notices, or MTQ highway sites near your location.",
     geoDenied: "Location was denied. Allow it in the browser, or type an address.",
     geoUnavailable: "Your location could not be found. Try again, or type an address.",
     geoTimeout: "Finding your location took too long. Try again, or type an address.",
@@ -265,34 +284,45 @@ export const COPY = {
     clearSearch: "Back to the borough map",
     boroughLabel: "Borough",
     allBoroughs: "All boroughs",
-    loading: "Loading work sites and notices…",
+    loading: "Loading work sites, notices, and highways…",
     loadError: "The server can't be reached right now.",
     count: (n) => (n === 1 ? "1 work site shown" : `${n} work sites shown`),
-    layerCount: ({ works, avis }) => {
-      const workText = works === 1 ? "1 work site" : `${works} work sites`;
-      const avisText = avis === 1 ? "1 notice" : `${avis} notices`;
-      if (!works && !avis) return "No work sites or notices shown";
-      if (!avis) return `${workText} shown`;
-      if (!works) return `${avisText} shown`;
-      return `${workText} and ${avisText} shown`;
+    layerCount: ({ works, avis, mtq = 0 }) => {
+      const parts = [];
+      if (works) parts.push(works === 1 ? "1 City work site" : `${works} City work sites`);
+      if (avis) parts.push(avis === 1 ? "1 notice" : `${avis} notices`);
+      if (mtq) parts.push(mtq === 1 ? "1 MTQ highway site" : `${mtq} MTQ highway sites`);
+      if (!parts.length) return "No City work, notices, or MTQ highway sites shown";
+      if (parts.length === 1) return `${parts[0]} shown`;
+      return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]} shown`;
     },
-    clickHint: "Tap an orange dot (roadwork) or a green dot (notice) on the map, or a name in the list.",
-    listTitle: "Work sites",
+    clickHint: "Tap an orange dot (City), a green dot (notice), or a purple mark (MTQ / 511) on the map, or a name in the list.",
+    listTitle: "City work sites",
     avisTitle: "Official notices",
     avisHint: "City notices about traffic or parking. This is not a complete list of demonstrations or parties.",
     avisEmpty: "No traffic or parking notices for this borough.",
+    mtqTitle: "Québec 511 highways",
+    mtqHint: "Lane closures on ministry highways, tunnels, and bridges. This is not the City street network.",
+    mtqEmpty: "No MTQ highway sites for this borough. Highways without a borough appear under All boroughs.",
+    mtqLink: "See on Québec 511",
+    mtqLanes: "Lanes",
+    mtqDetour: "Detour",
+    mtqDirection: "Direction",
+    mtqWhere: "Location",
     noticeLink: "Read the notice on montreal.ca",
     noticeType: "Type",
-    legendWork: "Roadwork",
+    legendWork: "City roadwork",
     legendAvis: "Official notices",
+    legendMtq: "MTQ / 511",
     kindWork: "Work site",
     kindAvis: "Notice",
+    kindMtq: "MTQ / 511",
     avisType: {
       "Circulation et transport": "Traffic and transport",
       Stationnement: "Parking",
     },
     resultsTitle: "Results",
-    noResults: "No work sites or notices found for that place.",
+    noResults: "No City work, notices, or MTQ highway sites found for that place.",
     placeFound: "Place located",
     streetMatch: "on this street",
     nearbyMatch: "nearby",
@@ -302,16 +332,20 @@ export const COPY = {
     daysActive: "Days active",
     unknown: "Not specified",
     close: "Close details",
-    footer: "Independent citizen application — data: City of Montreal (CC-BY 4.0), roadwork and official notices",
+    footer:
+      "Independent citizen application — data adapted from the City of Montreal (roadwork and notices) and Transports Québec / Québec 511 (highways), CC-BY 4.0",
     imported: "Last import",
     importedWorks: "Roadwork imported",
     importedAvis: "Notices imported",
+    importedMtq: "MTQ imported",
     importUnknown: "Last import: not available yet",
     langGroup: "Language",
     dataset: "Dataset",
-    datasetWorks: "Roadwork",
+    datasetWorks: "City roadwork",
     datasetAvis: "Notices and alerts",
+    datasetMtq: "MTQ roadwork",
     avisHuman: "City notices",
+    mtqHuman: "Québec 511",
     navMap: "Map",
     backToMap: "← Map",
     navSubscribe: "Subscribe",
@@ -587,6 +621,11 @@ export function formatImport(iso, lang, label) {
 export function avisTypeLabel(type, lang) {
   const copy = COPY[lang];
   return (copy.avisType && copy.avisType[type]) || type || copy.unknown;
+}
+
+export function mtqDescription(work, lang) {
+  if (lang === "en" && work.description_en) return work.description_en;
+  return work.description_fr || work.description_en || "";
 }
 
 export function geoErrorKey(error) {
