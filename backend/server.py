@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import unicodedata
 import urllib.parse
@@ -17,6 +18,21 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _load_env(path: Path) -> None:
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_env(ROOT / ".env")
+
 STORE_PATH = ROOT / "data" / "roadwork.json"
 FRONTEND_BUILD = ROOT.parent / "frontend" / "build"
 BOROUGH_FIELD = "boroughid"
@@ -35,7 +51,7 @@ app = FastAPI(title="Info-Route MTL", docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -265,6 +281,12 @@ def _safe_build_file(full_path: str) -> Path | None:
         return target
     index = root / "index.html"
     return index if index.is_file() else None
+
+
+from subscriptions import ensure_snapshot, router as subscribe_router
+
+app.include_router(subscribe_router)
+ensure_snapshot()
 
 
 if FRONTEND_BUILD.is_dir():

@@ -4,5 +4,8 @@ backend/**/__pycache__/
 frontend/node_modules/
 frontend/build/
 *.pyc
+.env
+backend/.env
+backend/data/digest_snapshot.json
 .DS_Store
 Thumbs.db

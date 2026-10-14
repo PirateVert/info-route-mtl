@@ -1,3 +1,35 @@
+html.dark {
+  color-scheme: dark;
+  --ink: #f4f1ea;
+  --muted: #c4b8a8;
+  --paper: #0f141b;
+  --card: #1c2430;
+  --line: #334155;
+  --navy: #e8eef6;
+  --orange: #fb923c;
+  --orange-dark: #fdba74;
+}
+
+html.dark body { background: var(--paper); }
+
+html.dark .search input,
+html.dark .filters select,
+html.dark .subscribe input,
+html.dark .subscribe select {
+  background: #0f172a;
+  color: var(--ink);
+  border-color: #64748b;
+}
+
+html.dark .site-list button.active { background: #3b2416; }
+
+html.dark .banner {
+  background: #3b2416;
+  color: var(--ink);
+}
+
+html.dark .leaflet-tile-pane { filter: brightness(0.72) saturate(0.85); }
+
 :root {
   color-scheme: light;
   --ink: #1c1915;
@@ -237,17 +269,198 @@ h1 {
   font-size: 0.95rem;
 }
 
-footer {
-  margin-top: 28px;
-  padding-top: 16px;
-  border-top: 2px solid var(--line);
-  color: var(--muted);
-  font-size: 0.95rem;
+.page-title {
+  margin: 8px 0 0;
+  font-size: 1.7rem;
 }
 
-footer p { margin: 0 0 8px; }
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom: 1px solid #e2e8f0;
+  backdrop-filter: blur(16px);
+}
 
-footer a { color: var(--navy); }
+html.dark .site-header {
+  background: rgba(2, 6, 23, 0.82);
+  border-bottom-color: #1e293b;
+}
+
+.site-header-bar {
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 64px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: #047857;
+  color: white;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.brand-title { font-weight: 700; font-size: 15px; }
+.brand-sub { font-size: 11px; color: var(--muted); }
+
+.desktop-nav { display: none; align-items: center; gap: 4px; }
+.desktop-nav a, .mobile-nav a {
+  text-decoration: none;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+html.dark .desktop-nav a, html.dark .mobile-nav a { color: #e2e8f0; }
+.desktop-nav a.active, .mobile-nav a.active { background: #047857; color: white; }
+
+.header-tools { display: flex; align-items: center; gap: 8px; }
+.icon-button, .lang-pill button {
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #334155;
+  cursor: pointer;
+}
+html.dark .icon-button, html.dark .lang-pill button {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+.icon-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+.lang-pill { display: flex; border-radius: 999px; overflow: hidden; }
+.lang-pill button {
+  min-width: 40px;
+  height: 36px;
+  font-weight: 700;
+  border-right: 0;
+}
+.lang-pill button + button { border-left: 0; }
+.lang-pill button[aria-pressed="true"] { background: #047857; color: white; border-color: #047857; }
+.desktop-lang { display: none; }
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #047857;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mobile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 16px 16px;
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+}
+html.dark .mobile-nav { background: #020617; border-bottom-color: #1e293b; }
+.mobile-nav a { padding: 12px 16px; font-size: 16px; }
+.mobile-tools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.site-footer {
+  margin-top: 28px;
+  padding: 16px;
+  border-top: 1px solid #e2e8f0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+html.dark .site-footer { border-top-color: #1e293b; }
+.site-footer-bar {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.site-footer a { color: #047857; font-weight: 700; }
+html.dark .site-footer a { color: #6ee7b7; }
+.footer-by { opacity: 0.8; font-weight: 400; }
+.footer-badge {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.footer-data {
+  max-width: 1180px;
+  margin: 8px auto 0;
+}
+
+.subscribe h1 { font-size: 2rem; }
+.subscribe-grid { display: grid; gap: 16px; }
+.subscribe .price { margin: 0 0 12px; }
+.subscribe .price strong { font-size: 3rem; color: #047857; }
+.subscribe label, .subscribe legend { display: block; font-weight: 700; margin: 12px 0 8px; }
+.subscribe input, .subscribe select {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+}
+.subscribe button[type="submit"] {
+  margin-top: 16px;
+  min-height: 52px;
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  background: #047857;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+.subscribe fieldset { border: 0; margin: 0; padding: 0; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 500; margin: 8px 0; }
+.check input { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+.preview-list { margin: 8px 0 0; padding-left: 18px; }
+.inline-link { display: inline-flex; align-items: center; text-decoration: none; }
+
+@media (min-width: 800px) {
+  .desktop-nav, .desktop-lang { display: flex; }
+  .menu-button, .mobile-nav { display: none; }
+  .subscribe-grid { grid-template-columns: 320px 1fr; align-items: start; }
+}
 
 @media (min-width: 900px) {
   .page { padding: 24px 24px 40px; }
@@ -261,7 +474,7 @@ footer a { color: var(--navy); }
     height: calc(100vh - 280px);
     min-height: 560px;
     position: sticky;
-    top: 16px;
+    top: 80px;
   }
   .side { order: 1; }
   .site-list { max-height: 32vh; }

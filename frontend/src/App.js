@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import WorkMap from "./WorkMap";
+import Subscribe from "./Subscribe";
+import { Footer, Header, useRoute } from "./chrome";
 import {
   COPY,
   MHM,
@@ -13,8 +15,6 @@ import {
   whoText,
 } from "./i18n";
 
-const DATASET_URL = "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d";
-
 async function getJson(path) {
   const base = process.env.REACT_APP_BACKEND_URL || "";
   const response = await fetch(`${base}${path}`);
@@ -27,6 +27,8 @@ async function getJson(path) {
 export default function App() {
   const [lang, setLang] = useState(readLang);
   const copy = COPY[lang];
+  const route = useRoute();
+  const path = route.split("?")[0];
   const [borough, setBorough] = useState(MHM);
   const [boroughs, setBoroughs] = useState([]);
   const [importedAt, setImportedAt] = useState("");
@@ -130,21 +132,15 @@ export default function App() {
   }, [boroughs]);
 
   return (
-    <div className="page">
-      <header className="top">
-        <div>
-          <h1>{copy.title}</h1>
-          <p className="tagline">{copy.tagline}</p>
-        </div>
-        <div className="lang" role="group" aria-label={copy.langGroup}>
-          <button type="button" aria-pressed={lang === "fr"} onClick={() => changeLang("fr")}>
-            FR
-          </button>
-          <button type="button" aria-pressed={lang === "en"} onClick={() => changeLang("en")}>
-            EN
-          </button>
-        </div>
-      </header>
+    <>
+    <Header lang={lang} setLang={changeLang} />
+    <main className="page">
+      {path.startsWith("/subscribe") ? (
+        <Subscribe lang={lang} />
+      ) : (
+      <>
+      <h1 className="page-title">{copy.title}</h1>
+      <p className="tagline">{copy.tagline}</p>
 
       <form className="search" onSubmit={onSearch}>
         <label htmlFor="street-search">{copy.searchLabel}</label>
@@ -258,15 +254,10 @@ export default function App() {
         </section>
       </div>
 
-      <footer>
-        <p>{copy.footer}</p>
-        <p>{formatImport(importedAt, lang)}</p>
-        <p>
-          <a href={DATASET_URL}>{copy.dataset}</a>
-          {" · "}
-          <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
-        </p>
-      </footer>
-    </div>
+      </>
+      )}
+    </main>
+    <Footer lang={lang} importedAt={importedAt} formatImport={formatImport} />
+    </>
   );
 }
