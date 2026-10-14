@@ -147,7 +147,7 @@ export function Header({ lang, setLang }) {
           <button type="button" className="icon-button" data-testid="theme-toggle" aria-label={copy.themeToggle} onClick={toggleTheme}>
             {theme === "dark" ? <Sun /> : <Moon />}
           </button>
-          <div className="lang-pill desktop-lang" role="group" aria-label={copy.langGroup}>
+          <div className="lang-pill header-lang" role="group" aria-label={copy.langGroup} data-testid="header-lang">
             <button type="button" aria-pressed={lang === "fr"} onClick={() => changeLang("fr")}>FR</button>
             <button type="button" aria-pressed={lang === "en"} onClick={() => changeLang("en")}>EN</button>
           </div>

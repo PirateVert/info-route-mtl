@@ -320,7 +320,13 @@ html.dark .site-header {
 }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-.brand-title { font-weight: 700; font-size: 15px; }
+.brand-title {
+  font-weight: 700;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .brand-sub { font-size: 11px; color: var(--muted); }
 
 .desktop-nav { display: none; align-items: center; gap: 4px; }
@@ -335,7 +341,7 @@ html.dark .site-header {
 html.dark .desktop-nav a, html.dark .mobile-nav a { color: #e2e8f0; }
 .desktop-nav a.active, .mobile-nav a.active { background: #047857; color: white; }
 
-.header-tools { display: flex; align-items: center; gap: 8px; }
+.header-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .icon-button, .lang-pill button {
   border: 1px solid #cbd5e1;
   background: white;
@@ -363,7 +369,7 @@ html.dark .icon-button, html.dark .lang-pill button {
 }
 .lang-pill button + button { border-left: 0; }
 .lang-pill button[aria-pressed="true"] { background: #047857; color: white; border-color: #047857; }
-.desktop-lang { display: none; }
+.header-lang { display: flex; }
 .menu-button {
   display: inline-flex;
   align-items: center;
@@ -480,7 +486,7 @@ html.dark .site-footer a { color: #6ee7b7; }
 .place-form { margin-top: 8px; }
 
 @media (min-width: 800px) {
-  .desktop-nav, .desktop-lang { display: flex; }
+  .desktop-nav { display: flex; }
   .menu-button, .mobile-nav { display: none; }
   .subscribe-grid { grid-template-columns: 320px 1fr; align-items: start; }
 }
