@@ -299,7 +299,7 @@ def _match_place(works: list[dict], place: dict) -> list[dict]:
 def _scope(borough: str, street: str = "", places: list[dict] | None = None) -> list[dict]:
     import server
 
-    works = server.all_works()
+    works = [*server.all_works(), *server.all_avis()]
     if borough:
         works = [work for work in works if work["borough"] == borough]
     cleaned = places if places is not None else _clean_places([], street)
@@ -386,7 +386,11 @@ def changes_for(borough: str, street: str, alerts: list[str], places: list[dict]
     import server
 
     cleaned = places if places is not None else _clean_places([], street)
-    current = {work["id"]: work for work in _scope(borough, places=cleaned) if work.get("id")}
+    current = {
+        work["id"]: work
+        for work in _scope(borough, places=cleaned)
+        if work.get("id") and work.get("kind") != "avis"
+    }
     previous = _load_snapshot()
     scoped_ids = set(current)
     for pid, row in previous.items():
@@ -475,7 +479,12 @@ def _preview_payload(borough: str, alerts: list[str], places: list[dict]) -> dic
     chosen = [item for item in alerts if item in ALERTS] or list(ALERTS)
     works = _scope(borough, places=places)
     samples = [
-        {"id": work["id"], "street": work["street"], "borough": work["borough"], "reason": work["reason"]}
+        {
+            "id": work["id"],
+            "street": work.get("street") or work.get("title") or "",
+            "borough": work.get("borough") or "",
+            "reason": work.get("reason") or work.get("type") or "",
+        }
         for work in works[:6]
     ]
     return {
