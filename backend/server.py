@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from impacts import empty_flags, flags_from_avis, flags_from_mtq, impact_payload
+from impacts import display_title, empty_flags, flags_from_avis, flags_from_mtq, impact_payload
 
 ROOT = Path(__file__).resolve().parent
 
@@ -246,12 +246,14 @@ def project(row: dict) -> dict:
     else:
         flags = empty_flags()
     lat, lng = map_point(row.get("latitude"), row.get("longitude"))
+    title = display_title(row, (stored or {}).get("segments") if isinstance(stored, dict) else None)
     item = {
         "id": row.get("id") or "",
         "kind": "work",
         "permit_id": row.get("permit_permit_id") or "",
         "borough": row.get(BOROUGH_FIELD) or "",
-        "street": row.get("occupancy_name") or "",
+        "title": title,
+        "street": title,
         "reason": row.get("reason_category") or "",
         "organization": row.get("organizationname") or "",
         "submitter": row.get("submittercategory") or "",

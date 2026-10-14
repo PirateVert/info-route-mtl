@@ -15,13 +15,15 @@ import csv
 import io
 import json
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from impacts import empty_flags, impact_payload, merge_impact_row
+from impacts import display_title, empty_flags, fallback_title, impact_payload, merge_impact_row
 
 SOURCE_URL = (
     "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d"
@@ -65,7 +67,7 @@ def read_rows(text: str) -> list[dict]:
     return rows
 
 
-def join_impacts(works: list[dict], impact_rows: list[dict]) -> None:
+def join_impacts(works: list[dict], impact_rows: list[dict], geocode: bool = True) -> int:
     by_id: dict[str, list[dict]] = defaultdict(list)
     for row in impact_rows:
         key = (row.get("id_request") or "").strip()
@@ -81,10 +83,82 @@ def join_impacts(works: list[dict], impact_rows: list[dict]) -> None:
             related = by_id.get(permit, [])
         for row in related:
             merge_impact_row(flags, row)
-        work["impact"] = impact_payload(flags)
+        payload = impact_payload(flags)
+        if flags.get("segments"):
+            payload["segments"] = list(flags["segments"])
+        work["impact"] = payload
         if related:
             matched += 1
+    if geocode:
+        fill_geocoded_streets(works, by_id)
     return matched
+
+
+def _float(value) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+_last_nominatim = 0.0
+
+
+def reverse_street(lat, lng) -> str:
+    """Last-resort street name from coordinates (Nominatim reverse)."""
+    global _last_nominatim
+    lat_f, lng_f = _float(lat), _float(lng)
+    if lat_f is None or lng_f is None or (lat_f == 0 and lng_f == 0):
+        return ""
+    wait = 1.05 - (time.time() - _last_nominatim)
+    if wait > 0:
+        time.sleep(wait)
+    params = urllib.parse.urlencode(
+        {
+            "lat": f"{lat_f:.7f}",
+            "lon": f"{lng_f:.7f}",
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "zoom": 17,
+        }
+    )
+    request = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/reverse?{params}",
+        headers={
+            "User-Agent": "Info-Route MTL/1.0 (roadwork titles; Montreal)",
+            "Accept-Language": "fr,en",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        _last_nominatim = time.time()
+        return ""
+    _last_nominatim = time.time()
+    address = payload.get("address") if isinstance(payload, dict) else {}
+    if not isinstance(address, dict):
+        return ""
+    for key in ("road", "pedestrian", "footway", "path", "neighbourhood", "suburb"):
+        value = (address.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def fill_geocoded_streets(works: list[dict], by_id: dict[str, list[dict]]) -> None:
+    for work in works:
+        related = by_id.get(work.get("id") or "", [])
+        if not related:
+            related = by_id.get((work.get("permit_permit_id") or "").strip(), [])
+        title = display_title(work, related)
+        if title and title != fallback_title(work):
+            continue
+        geo = reverse_street(work.get("latitude"), work.get("longitude"))
+        if geo:
+            work["geocoded_street"] = geo
 
 
 def main() -> None:
@@ -115,10 +189,18 @@ def main() -> None:
     OUT_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     mhm = sum(1 for row in rows if row.get(BOROUGH_FIELD) == MHM)
+    primaries = Counter(
+        (row.get("impact") or {}).get("map_primary")
+        for row in rows
+        if (row.get("impact") or {}).get("closes")
+    )
     print(f"Wrote {OUT_PATH}")
     print(
         f"rows={len(rows)} impacts={len(impact_rows)} matched={matched} "
-        f"closing={closing} borough_field={BOROUGH_FIELD} mhm={mhm}"
+        f"closing={closing} none={len(rows) - closing} "
+        f"street={primaries['street']} lane={primaries['lane']} "
+        f"sidewalk={primaries['sidewalk']} parking={primaries['parking']} "
+        f"borough_field={BOROUGH_FIELD} mhm={mhm}"
     )
 
 
