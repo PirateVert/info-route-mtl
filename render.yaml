@@ -7,3 +7,8 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/
+    envVars:
+      - key: APP_ORIGIN
+        value: https://info-route-mtl.onrender.com
+      - key: STRIPE_SECRET_KEY
+        sync: false

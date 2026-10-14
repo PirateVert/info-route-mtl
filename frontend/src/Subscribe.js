@@ -4,6 +4,14 @@ import { navigate } from "./chrome";
 
 const ALERT_KEYS = ["new", "ending", "dates", "status", "who", "reason"];
 const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"];
+const PLACE_TYPES = ["route", "street", "address", "intersection"];
+const MAX_PLACES = 10;
+
+function placeLabel(place) {
+  if (place.type === "route") return `${place.query} → ${place.via}`;
+  if (place.type === "intersection") return `${place.query} × ${place.via}`;
+  return place.query;
+}
 
 async function sendJson(path, options = {}) {
   const response = await fetch(path, {
@@ -32,6 +40,91 @@ export default function Subscribe({ lang }) {
   return <Signup lang={lang} copy={copy} />;
 }
 
+function PlacesEditor({ copy, places, setPlaces, setError }) {
+  const [kind, setKind] = useState("route");
+  const [query, setQuery] = useState("");
+  const [via, setVia] = useState("");
+  const [adding, setAdding] = useState(false);
+  const needsVia = kind === "route" || kind === "intersection";
+
+  async function addPlace(event) {
+    event.preventDefault();
+    if (places.length >= MAX_PLACES) {
+      setError(copy.errors.too_many_places);
+      return;
+    }
+    setAdding(true);
+    setError("");
+    try {
+      const next = { type: kind, query: query.trim(), via: via.trim() };
+      await sendJson("/api/subscribe/preview", {
+        method: "POST",
+        body: JSON.stringify({ places: [...places, next] }),
+      });
+      setPlaces((current) => [...current, next]);
+      setQuery("");
+      setVia("");
+    } catch (err) {
+      setError(errorText(copy, err));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <div className="places">
+      <h3>{copy.placesTitle}</h3>
+      <p className="hint">{copy.placesHelp(places.length)}</p>
+      <ul className="place-list">
+        {places.map((place, index) => (
+          <li key={`${place.type}-${place.query}-${place.via}-${index}`}>
+            <span className="place-kind">{copy.placeType[place.type]}</span>
+            <span className="place-label">{placeLabel(place)}</span>
+            <button
+              type="button"
+              className="text-button place-remove"
+              onClick={() => setPlaces((current) => current.filter((_, i) => i !== index))}
+            >
+              {copy.removePlace}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {places.length < MAX_PLACES && (
+        <div className="place-form">
+          <label htmlFor="place-type">{copy.placeKind}</label>
+          <select id="place-type" value={kind} onChange={(event) => setKind(event.target.value)}>
+            {PLACE_TYPES.map((item) => (
+              <option key={item} value={item}>{copy.placeType[item]}</option>
+            ))}
+          </select>
+          <label htmlFor="place-query">{copy.placeQuery[kind]}</label>
+          <input
+            id="place-query"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={copy.placePlaceholder[kind]}
+          />
+          {needsVia && (
+            <>
+              <label htmlFor="place-via">{copy.placeVia[kind]}</label>
+              <input
+                id="place-via"
+                value={via}
+                onChange={(event) => setVia(event.target.value)}
+                placeholder={copy.placeViaPlaceholder[kind]}
+              />
+            </>
+          )}
+          <button type="button" className="text-button" disabled={adding || !query.trim() || (needsVia && !via.trim())} onClick={addPlace}>
+            {adding ? copy.addingPlace : copy.addPlace}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Signup({ lang, copy }) {
   const [email, setEmail] = useState("");
   const [frequency, setFrequency] = useState("weekly");
@@ -39,7 +132,7 @@ function Signup({ lang, copy }) {
   const [alerts, setAlerts] = useState(ALERT_KEYS);
   const [borough, setBorough] = useState(MHM);
   const [boroughs, setBoroughs] = useState([]);
-  const [street, setStreet] = useState("");
+  const [places, setPlaces] = useState([]);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -52,18 +145,16 @@ function Signup({ lang, copy }) {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (borough) params.set("borough", borough);
-    if (street.trim()) params.set("q", street.trim());
-    params.set("alerts", alerts.join(","));
     const timer = setTimeout(() => {
-      fetch(`/api/subscribe/preview?${params}`)
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => setPreview(data))
+      sendJson("/api/subscribe/preview", {
+        method: "POST",
+        body: JSON.stringify({ borough, alerts, places }),
+      })
+        .then(setPreview)
         .catch(() => setPreview(null));
     }, 350);
     return () => clearTimeout(timer);
-  }, [borough, street, alerts]);
+  }, [borough, alerts, places]);
 
   function toggleAlert(key) {
     setAlerts((current) => (
@@ -84,7 +175,7 @@ function Signup({ lang, copy }) {
           frequency,
           language,
           borough,
-          street,
+          places,
           origin_url: window.location.origin,
         }),
       });
@@ -142,8 +233,7 @@ function Signup({ lang, copy }) {
             {names.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
 
-          <label htmlFor="sub-street">{copy.street}</label>
-          <input id="sub-street" value={street} onChange={(event) => setStreet(event.target.value)} placeholder={copy.streetPlaceholder} />
+          <PlacesEditor copy={copy} places={places} setPlaces={setPlaces} setError={setError} />
 
           {preview && (
             <p className="hint">
@@ -188,6 +278,16 @@ function Success({ lang }) {
         <article className="detail">
           <p>{info.paid ? copy.successPaid : copy.successPending}</p>
           <p>{info.email}</p>
+          {info.places?.length > 0 && (
+            <ul className="place-list">
+              {info.places.map((place, index) => (
+                <li key={`${place.type}-${index}`}>
+                  <span className="place-kind">{copy.placeType[place.type]}</span>
+                  <span className="place-label">{placeLabel(place)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {info.manage_token && (
             <p>
               <a href={`/subscribe/manage?token=${encodeURIComponent(info.manage_token)}`} onClick={(event) => { event.preventDefault(); navigate(`/subscribe/manage?token=${encodeURIComponent(info.manage_token)}`); }}>
@@ -234,7 +334,7 @@ function Manage({ lang }) {
           frequency: data.frequency,
           language: data.language,
           borough: data.borough || "",
-          street: data.street || "",
+          places: data.places || (data.street ? [{ type: "street", query: data.street, via: "" }] : []),
           email: data.email || "",
         });
       })
@@ -302,8 +402,15 @@ function Manage({ lang }) {
           <option value="en">English</option>
           <option value="both">{copy.bothLanguages}</option>
         </select>
-        <label htmlFor="manage-street">{copy.street}</label>
-        <input id="manage-street" value={form.street} onChange={(event) => setForm({ ...form, street: event.target.value })} />
+        <PlacesEditor
+          copy={copy}
+          places={form.places}
+          setPlaces={(next) => setForm((current) => ({
+            ...current,
+            places: typeof next === "function" ? next(current.places) : next,
+          }))}
+          setError={setError}
+        />
         <button type="submit" disabled={busy}>{busy ? copy.sending : copy.save}</button>
         {saved && <p className="hint">{copy.saved}</p>}
         {error && <p className="banner">{error}</p>}
