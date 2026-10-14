@@ -19,6 +19,7 @@ import {
   storeLang,
   whoText,
 } from "./i18n";
+import { anyLayerOn, defaultLayers, layerKey, LAYER_IDS, matchesLayers } from "./layers";
 import PlaceKindBar from "./PlaceKindBar";
 import {
   FREE_MAX,
@@ -144,7 +145,7 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [search, setSearch] = useState(null);
   const [selectedId, setSelectedId] = useState("");
-  const [showAll, setShowAll] = useState(false);
+  const [layers, setLayers] = useState(defaultLayers);
   const [places, setPlaces] = useState(readPlaces);
   const [placeStatuses, setPlaceStatuses] = useState([]);
   const [placeKind, setPlaceKind] = useState("home");
@@ -458,9 +459,8 @@ export default function App() {
   );
   const shown = useMemo(() => {
     const rows = search ? search.results || [] : layered;
-    if (showAll) return rows;
-    return rows.filter((item) => item.closes);
-  }, [search, layered, showAll]);
+    return rows.filter((item) => matchesLayers(item, layers));
+  }, [search, layered, layers]);
   const workCount = shown.filter((item) => item.kind !== "avis" && item.kind !== "mtq").length;
   const avisCount = shown.filter((item) => item.kind === "avis").length;
   const mtqCount = shown.filter((item) => item.kind === "mtq").length;
@@ -484,7 +484,7 @@ export default function App() {
     ? `pin:${pin.lat}:${pin.lng}`
     : search
       ? `search:${search.type || ""}:${search.query}:${search.place?.lat || ""}:${search.place?.lng || ""}`
-      : `borough:${borough}:w${works.length}:a${avis.length}:m${mtq.length}:all${showAll}`;
+      : `borough:${borough}:w${works.length}:a${avis.length}:m${mtq.length}:layers${layerKey(layers)}`;
 
   const boroughOptions = useMemo(() => {
     const names = new Set(boroughs);
@@ -661,11 +661,52 @@ export default function App() {
             </option>
           ))}
         </select>
-        <label className="check show-all">
-          <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
-          <span>{copy.showAll}</span>
-        </label>
-        <p className="count">{loading ? copy.loading : copy.layerCount({ works: workCount, avis: avisCount, mtq: mtqCount })}</p>
+        <div className="layer-controls">
+          <div className="layer-controls-head">
+            <p className="legend-title" id="map-options-label">{copy.mapOptions}</p>
+            <div className="layer-bulk">
+              <button type="button" className="text-button" onClick={() => setLayers(Object.fromEntries(LAYER_IDS.map((id) => [id, true])))}>
+                {copy.layersAllOn}
+              </button>
+              <button type="button" className="text-button" onClick={() => setLayers(Object.fromEntries(LAYER_IDS.map((id) => [id, false])))}>
+                {copy.layersAllOff}
+              </button>
+            </div>
+          </div>
+          <p className="hint">{copy.mapOptionsHint}</p>
+          <div className="layer-toggles" role="group" aria-labelledby="map-options-label">
+            {LAYER_IDS.map((id) => {
+              const on = Boolean(layers[id]);
+              const label = {
+                street: copy.legendStreet,
+                lane: copy.legendLane,
+                sidewalk: copy.legendSidewalk,
+                parking: copy.legendParking,
+                none: copy.legendNone,
+              }[id];
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className="layer-toggle"
+                  aria-pressed={on}
+                  onClick={() => setLayers((current) => ({ ...current, [id]: !current[id] }))}
+                >
+                  <i className={`swatch ${id}`} aria-hidden="true" />
+                  <span>{label}</span>
+                  <span className="switch" aria-hidden="true"><i /></span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="count">
+          {loading
+            ? copy.loading
+            : anyLayerOn(layers)
+              ? copy.layerCount({ works: workCount, avis: avisCount, mtq: mtqCount })
+              : copy.layersNoneOn}
+        </p>
         {search && (
           <button type="button" className="text-button" onClick={clearSearch}>
             {copy.clearSearch}
@@ -699,17 +740,13 @@ export default function App() {
               snowLots={snowAvailable ? nearbySnow : []}
             />
           </div>
-          <div className="legend">
-            <p className="legend-title">{copy.legendTitle}</p>
-            <p className="legend-items">
-              <span><i className="swatch street" aria-hidden="true" /> {copy.legendStreet}</span>
-              <span><i className="swatch lane" aria-hidden="true" /> {copy.legendLane}</span>
-              <span><i className="swatch sidewalk" aria-hidden="true" /> {copy.legendSidewalk}</span>
-              <span><i className="swatch parking" aria-hidden="true" /> {copy.legendParking}</span>
-              {showAll && <span><i className="swatch none" aria-hidden="true" /> {copy.legendNone}</span>}
-              {snowAvailable && <span><i className="swatch snow" aria-hidden="true" /> {copy.legendSnow}</span>}
-            </p>
-          </div>
+          {snowAvailable && (
+            <div className="legend">
+              <p className="legend-items">
+                <span><i className="swatch snow" aria-hidden="true" /> {copy.legendSnow}</span>
+              </p>
+            </div>
+          )}
         </div>
 
         <section className="side">
@@ -835,14 +872,14 @@ export default function App() {
               <SiteList items={shown.filter((item) => item.kind !== "avis" && item.kind !== "mtq")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               <h3>{copy.avisTitle}</h3>
               <p className="hint">{copy.avisHint}</p>
-              {avis.filter((item) => showAll || item.closes).length === 0 ? (
+              {shown.filter((item) => item.kind === "avis").length === 0 ? (
                 <p className="hint">{copy.avisEmpty}</p>
               ) : (
                 <SiteList items={shown.filter((item) => item.kind === "avis")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               )}
               <h3>{copy.mtqTitle}</h3>
               <p className="hint">{copy.mtqHint}</p>
-              {mtq.filter((item) => showAll || item.closes).length === 0 ? (
+              {shown.filter((item) => item.kind === "mtq").length === 0 ? (
                 <p className="hint">{copy.mtqEmpty}</p>
               ) : (
                 <SiteList items={shown.filter((item) => item.kind === "mtq")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />

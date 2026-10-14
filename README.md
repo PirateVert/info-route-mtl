@@ -54,7 +54,7 @@ Télécharge le CSV des entraves **et** le CSV [Impacts des entraves](https://do
 - Stationnement interdit / No parking (jaune)
 - sinon Travaux sans fermeture annoncée (gris)
 
-La carte n'affiche par défaut que les sites qui ferment quelque chose. Case à cocher : afficher toute l'activité.
+La carte propose des interrupteurs pour rue fermée, voie fermée, trottoir fermé, stationnement interdit, et les chantiers sans fermeture annoncée. Plusieurs peuvent être allumés en même temps. Par défaut, les quatre fermetures sont allumées et « sans fermeture » est éteint.
 
 ```powershell
 cd backend
