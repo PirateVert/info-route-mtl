@@ -5,6 +5,7 @@ import { Footer, Header, useRoute } from "./chrome";
 import {
   COPY,
   MHM,
+  avisTypeLabel,
   dateRangeText,
   formatDistance,
   formatImport,
@@ -42,6 +43,37 @@ function errorMessage(copy, error) {
   return copy.loadError;
 }
 
+function SiteList({ items, selectedId, onSelect, copy, lang, search = false }) {
+  return (
+    <ul className="site-list">
+      {items.map((work) => {
+        const avis = work.kind === "avis";
+        return (
+          <li key={work.id}>
+            <button
+              type="button"
+              className={`${work.id === selectedId ? "active" : ""} ${avis ? "avis-item" : ""}`.trim()}
+              onClick={() => onSelect(work)}
+            >
+              <span className="street">{work.title || work.street || copy.unknown}</span>
+              <span className="meta">
+                {avis ? `${copy.kindAvis} · ` : ""}
+                {work.borough}
+                {search && work.match
+                  ? ` · ${work.match === "street" ? copy.streetMatch : copy.nearbyMatch}`
+                  : ""}
+                {search && formatDistance(work.distance_m, lang)
+                  ? ` · ${formatDistance(work.distance_m, lang)}`
+                  : ""}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function App() {
   const [lang, setLang] = useState(readLang);
   const copy = COPY[lang];
@@ -50,7 +82,9 @@ export default function App() {
   const [borough, setBorough] = useState(MHM);
   const [boroughs, setBoroughs] = useState([]);
   const [importedAt, setImportedAt] = useState("");
+  const [avisImportedAt, setAvisImportedAt] = useState("");
   const [works, setWorks] = useState([]);
+  const [avis, setAvis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -71,6 +105,7 @@ export default function App() {
         if (cancel) return;
         setBoroughs((data.boroughs || []).map((item) => item.name));
         setImportedAt(data.imported_at || "");
+        setAvisImportedAt(data.avis?.imported_at || "");
       })
       .catch(() => {
         if (!cancel) setError("loadError");
@@ -84,11 +119,16 @@ export default function App() {
     let cancel = false;
     setLoading(true);
     setError("");
-    const path = borough ? `/api/works?borough=${encodeURIComponent(borough)}` : "/api/works";
-    getJson(path)
-      .then((data) => {
+    const worksPath = borough ? `/api/works?borough=${encodeURIComponent(borough)}` : "/api/works";
+    const avisPath = borough ? `/api/avis?borough=${encodeURIComponent(borough)}` : "/api/avis";
+    Promise.all([
+      getJson(worksPath),
+      getJson(avisPath).catch(() => ({ avis: [] })),
+    ])
+      .then(([workData, avisData]) => {
         if (cancel) return;
-        setWorks(data.works || []);
+        setWorks(workData.works || []);
+        setAvis(avisData.avis || []);
         setLoading(false);
       })
       .catch(() => {
@@ -171,7 +211,16 @@ export default function App() {
     setSelectedId("");
   }
 
-  const shown = search ? search.results || [] : works;
+  const layered = useMemo(
+    () => [
+      ...works.map((work) => ({ ...work, kind: work.kind || "work" })),
+      ...avis.map((item) => ({ ...item, kind: "avis" })),
+    ],
+    [works, avis]
+  );
+  const shown = search ? search.results || [] : layered;
+  const workCount = shown.filter((item) => item.kind !== "avis").length;
+  const avisCount = shown.filter((item) => item.kind === "avis").length;
   const selected = useMemo(
     () => shown.find((work) => work.id === selectedId) || null,
     [shown, selectedId]
@@ -182,7 +231,7 @@ export default function App() {
   }, [search, copy.youAreHere]);
   const fitToken = search
     ? `search:${search.query}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.source || ""}`
-    : `borough:${borough}`;
+    : `borough:${borough}:w${works.length}:a${avis.length}`;
 
   const boroughOptions = useMemo(() => {
     const names = new Set(boroughs);
@@ -200,6 +249,7 @@ export default function App() {
       <>
       <h1 className="page-title">{copy.title}</h1>
       <p className="tagline">{copy.tagline}</p>
+      <p className="disclaimer">{copy.disclaimer}</p>
 
       <form className="search" onSubmit={onSearch}>
         <label htmlFor="street-search">{copy.searchLabel}</label>
@@ -243,7 +293,7 @@ export default function App() {
             </option>
           ))}
         </select>
-        <p className="count">{loading ? copy.loading : copy.count(shown.length)}</p>
+        <p className="count">{loading ? copy.loading : copy.layerCount({ works: workCount, avis: avisCount })}</p>
         {search && (
           <button type="button" className="text-button" onClick={clearSearch}>
             {copy.clearSearch}
@@ -262,6 +312,10 @@ export default function App() {
             fitToken={fitToken}
             here={here}
           />
+          <p className="legend">
+            <span><i className="swatch work" /> {copy.legendWork}</span>
+            <span><i className="swatch avis" /> {copy.legendAvis}</span>
+          </p>
         </div>
 
         <section className="side">
@@ -274,26 +328,49 @@ export default function App() {
 
           {selected ? (
             <article className="detail" id="site-detail">
-              <h2>{selected.street || copy.unknown}</h2>
+              <p className={`kind-pill ${selected.kind === "avis" ? "avis" : "work"}`}>
+                {selected.kind === "avis" ? copy.kindAvis : copy.kindWork}
+              </p>
+              <h2>{selected.title || selected.street || copy.unknown}</h2>
               <p className="borough-name">{selected.borough}</p>
-              <dl>
-                <div>
-                  <dt>{copy.reason}</dt>
-                  <dd>{reasonLabel(selected, lang)}</dd>
-                </div>
-                <div>
-                  <dt>{copy.who}</dt>
-                  <dd>{whoText(selected, lang)}</dd>
-                </div>
-                <div>
-                  <dt>{copy.dates}</dt>
-                  <dd>{dateRangeText(selected, lang)}</dd>
-                </div>
-                <div>
-                  <dt>{copy.daysActive}</dt>
-                  <dd>{scheduleText(selected, lang)}</dd>
-                </div>
-              </dl>
+              {selected.kind === "avis" ? (
+                <>
+                  <dl>
+                    <div>
+                      <dt>{copy.noticeType}</dt>
+                      <dd>{avisTypeLabel(selected.type, lang)}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.dates}</dt>
+                      <dd>{dateRangeText(selected, lang)}</dd>
+                    </div>
+                  </dl>
+                  {selected.url && (
+                    <a className="notice-link" href={selected.url} target="_blank" rel="noreferrer">
+                      {copy.noticeLink}
+                    </a>
+                  )}
+                </>
+              ) : (
+                <dl>
+                  <div>
+                    <dt>{copy.reason}</dt>
+                    <dd>{reasonLabel(selected, lang)}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.who}</dt>
+                    <dd>{whoText(selected, lang)}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.dates}</dt>
+                    <dd>{dateRangeText(selected, lang)}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.daysActive}</dt>
+                    <dd>{scheduleText(selected, lang)}</dd>
+                  </div>
+                </dl>
+              )}
             </article>
           ) : (
             <p className="hint" id="site-detail">
@@ -301,39 +378,34 @@ export default function App() {
             </p>
           )}
 
-          <h3>{search ? copy.resultsTitle : copy.listTitle}</h3>
-          {search && shown.length === 0 && (
-            <p className="hint">{here ? copy.noResultsHere : copy.noResults}</p>
+          {search ? (
+            <>
+              <h3>{copy.resultsTitle}</h3>
+              {shown.length === 0 && (
+                <p className="hint">{here ? copy.noResultsHere : copy.noResults}</p>
+              )}
+              <SiteList items={shown} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} search />
+            </>
+          ) : (
+            <>
+              <h3>{copy.listTitle}</h3>
+              <SiteList items={works} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+              <h3>{copy.avisTitle}</h3>
+              <p className="hint">{copy.avisHint}</p>
+              {avis.length === 0 ? (
+                <p className="hint">{copy.avisEmpty}</p>
+              ) : (
+                <SiteList items={avis} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+              )}
+            </>
           )}
-          <ul className="site-list">
-            {shown.map((work) => (
-              <li key={work.id}>
-                <button
-                  type="button"
-                  className={work.id === selectedId ? "active" : ""}
-                  onClick={() => selectWork(work)}
-                >
-                  <span className="street">{work.street || copy.unknown}</span>
-                  <span className="meta">
-                    {work.borough}
-                    {search && work.match
-                      ? ` · ${work.match === "street" ? copy.streetMatch : copy.nearbyMatch}`
-                      : ""}
-                    {search && formatDistance(work.distance_m, lang)
-                      ? ` · ${formatDistance(work.distance_m, lang)}`
-                      : ""}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
         </section>
       </div>
 
       </>
       )}
     </main>
-    <Footer lang={lang} importedAt={importedAt} formatImport={formatImport} />
+    <Footer lang={lang} importedAt={importedAt} avisImportedAt={avisImportedAt} formatImport={formatImport} />
     </>
   );
 }

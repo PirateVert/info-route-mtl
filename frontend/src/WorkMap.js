@@ -49,7 +49,7 @@ export default function WorkMap({ works, selectedId, onSelect, fitToken, here })
       zoom={13}
       scrollWheelZoom={false}
       className="map"
-      aria-label="Carte des travaux"
+      aria-label="Carte des travaux et des avis"
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -72,20 +72,21 @@ export default function WorkMap({ works, selectedId, onSelect, fitToken, here })
       )}
       {markers.map((work) => {
         const selected = work.id === selectedId;
+        const avis = work.kind === "avis";
         return (
           <CircleMarker
             key={work.id}
             center={[work.lat, work.lng]}
-            radius={selected ? 14 : 10}
+            radius={selected ? 14 : avis ? 9 : 10}
             pathOptions={{
-              color: selected ? "#1f2a37" : "#9a3412",
-              fillColor: selected ? "#1d4ed8" : "#ea580c",
+              color: selected ? "#1f2a37" : avis ? "#065f46" : "#9a3412",
+              fillColor: selected ? "#1d4ed8" : avis ? "#047857" : "#ea580c",
               fillOpacity: 0.92,
-              weight: 2,
+              weight: avis ? 3 : 2,
             }}
             eventHandlers={{ click: () => onSelect(work) }}
           >
-            <Tooltip>{work.street || work.borough}</Tooltip>
+            <Tooltip>{work.title || work.street || work.borough}</Tooltip>
           </CircleMarker>
         );
       })}

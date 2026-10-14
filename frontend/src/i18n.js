@@ -58,7 +58,9 @@ const WEEKDAYS = {
 export const COPY = {
   fr: {
     title: "Info-Route MTL",
-    tagline: "Les travaux routiers en cours, en langage clair.",
+    tagline: "Travaux routiers et avis officiels de circulation ou de stationnement, en langage clair.",
+    disclaimer:
+      "Les avis viennent du site de la Ville. Ce n'est pas un inventaire complet des manifestations, fêtes ou fermetures ponctuelles.",
     searchLabel: "Qu'est-ce qui se passe sur ma rue?",
     searchPlaceholder: "Ex. rue Ontario, Hochelaga, 4200 rue Notre-Dame",
     searchButton: "Chercher",
@@ -66,7 +68,7 @@ export const COPY = {
     useMyLocation: "Utiliser ma position",
     locating: "Localisation…",
     youAreHere: "Vous êtes ici",
-    noResultsHere: "Aucun chantier à proximité de votre position.",
+    noResultsHere: "Aucun chantier ni avis à proximité de votre position.",
     geoDenied: "La localisation a été refusée. Autorisez-la dans le navigateur, ou tapez une adresse.",
     geoUnavailable: "Impossible d'obtenir votre position. Réessayez, ou tapez une adresse.",
     geoTimeout: "La localisation a pris trop de temps. Réessayez, ou tapez une adresse.",
@@ -75,13 +77,34 @@ export const COPY = {
     clearSearch: "Revenir à la carte de l'arrondissement",
     boroughLabel: "Arrondissement",
     allBoroughs: "Tous les arrondissements",
-    loading: "Chargement des chantiers…",
+    loading: "Chargement des chantiers et des avis…",
     loadError: "Impossible de joindre le serveur pour le moment.",
     count: (n) => (n === 1 ? "1 chantier affiché" : `${n} chantiers affichés`),
-    clickHint: "Touchez un point orange sur la carte, ou un nom de rue dans la liste.",
+    layerCount: ({ works, avis }) => {
+      const workText = works === 1 ? "1 chantier" : `${works} chantiers`;
+      const avisText = avis === 1 ? "1 avis" : `${avis} avis`;
+      if (!works && !avis) return "Aucun chantier ni avis affiché";
+      if (!avis) return `${workText} affiché${works > 1 ? "s" : ""}`;
+      if (!works) return `${avisText} affiché${avis > 1 ? "s" : ""}`;
+      return `${workText} et ${avisText} affichés`;
+    },
+    clickHint: "Touchez un point orange (travaux) ou vert (avis) sur la carte, ou un nom dans la liste.",
     listTitle: "Chantiers",
+    avisTitle: "Avis officiels",
+    avisHint: "Avis de circulation ou de stationnement publiés par la Ville. Pas une liste complète des manifestations ou fêtes.",
+    avisEmpty: "Aucun avis de circulation ou de stationnement pour cet arrondissement.",
+    noticeLink: "Lire l'avis sur montreal.ca",
+    noticeType: "Type",
+    legendWork: "Travaux",
+    legendAvis: "Avis officiels",
+    kindWork: "Chantier",
+    kindAvis: "Avis",
+    avisType: {
+      "Circulation et transport": "Circulation et transport",
+      Stationnement: "Stationnement",
+    },
     resultsTitle: "Résultats",
-    noResults: "Aucun chantier trouvé pour cette adresse.",
+    noResults: "Aucun chantier ni avis trouvé pour cette adresse.",
     placeFound: "Adresse repérée",
     streetMatch: "sur cette rue",
     nearbyMatch: "à proximité",
@@ -92,11 +115,16 @@ export const COPY = {
     unknown: "Non précisé",
     close: "Fermer le détail",
     footer:
-      "Application citoyenne indépendante — données : Ville de Montréal (CC-BY 4.0)",
+      "Application citoyenne indépendante — données : Ville de Montréal (CC-BY 4.0), travaux routiers et avis et alertes",
     imported: "Dernière importation",
+    importedWorks: "Travaux importés",
+    importedAvis: "Avis importés",
     importUnknown: "Dernière importation : pas encore disponible",
     langGroup: "Langue",
     dataset: "Jeu de données",
+    datasetWorks: "Travaux routiers",
+    datasetAvis: "Avis et alertes",
+    avisHuman: "Avis de la Ville",
     navMap: "Carte",
     navSubscribe: "Abonnement",
     navParks: "Parcs MHM",
@@ -211,7 +239,9 @@ export const COPY = {
   },
   en: {
     title: "Info-Route MTL",
-    tagline: "Current roadwork, in plain language.",
+    tagline: "Current roadwork and official traffic or parking notices, in plain language.",
+    disclaimer:
+      "Notices come from the City site. This is not a complete list of demonstrations, parties, or one-off closures.",
     searchLabel: "What's happening on my street?",
     searchPlaceholder: "e.g. Ontario Street, Hochelaga, 4200 Notre-Dame",
     searchButton: "Search",
@@ -219,7 +249,7 @@ export const COPY = {
     useMyLocation: "Use my location",
     locating: "Locating…",
     youAreHere: "You are here",
-    noResultsHere: "No work sites near your location.",
+    noResultsHere: "No work sites or notices near your location.",
     geoDenied: "Location was denied. Allow it in the browser, or type an address.",
     geoUnavailable: "Your location could not be found. Try again, or type an address.",
     geoTimeout: "Finding your location took too long. Try again, or type an address.",
@@ -228,13 +258,34 @@ export const COPY = {
     clearSearch: "Back to the borough map",
     boroughLabel: "Borough",
     allBoroughs: "All boroughs",
-    loading: "Loading work sites…",
+    loading: "Loading work sites and notices…",
     loadError: "The server can't be reached right now.",
     count: (n) => (n === 1 ? "1 work site shown" : `${n} work sites shown`),
-    clickHint: "Tap an orange dot on the map, or a street name in the list.",
+    layerCount: ({ works, avis }) => {
+      const workText = works === 1 ? "1 work site" : `${works} work sites`;
+      const avisText = avis === 1 ? "1 notice" : `${avis} notices`;
+      if (!works && !avis) return "No work sites or notices shown";
+      if (!avis) return `${workText} shown`;
+      if (!works) return `${avisText} shown`;
+      return `${workText} and ${avisText} shown`;
+    },
+    clickHint: "Tap an orange dot (roadwork) or a green dot (notice) on the map, or a name in the list.",
     listTitle: "Work sites",
+    avisTitle: "Official notices",
+    avisHint: "City notices about traffic or parking. This is not a complete list of demonstrations or parties.",
+    avisEmpty: "No traffic or parking notices for this borough.",
+    noticeLink: "Read the notice on montreal.ca",
+    noticeType: "Type",
+    legendWork: "Roadwork",
+    legendAvis: "Official notices",
+    kindWork: "Work site",
+    kindAvis: "Notice",
+    avisType: {
+      "Circulation et transport": "Traffic and transport",
+      Stationnement: "Parking",
+    },
     resultsTitle: "Results",
-    noResults: "No work sites found for that address.",
+    noResults: "No work sites or notices found for that address.",
     placeFound: "Address located",
     streetMatch: "on this street",
     nearbyMatch: "nearby",
@@ -244,11 +295,16 @@ export const COPY = {
     daysActive: "Days active",
     unknown: "Not specified",
     close: "Close details",
-    footer: "Independent citizen application — data: City of Montreal (CC-BY 4.0)",
+    footer: "Independent citizen application — data: City of Montreal (CC-BY 4.0), roadwork and official notices",
     imported: "Last import",
+    importedWorks: "Roadwork imported",
+    importedAvis: "Notices imported",
     importUnknown: "Last import: not available yet",
     langGroup: "Language",
     dataset: "Dataset",
+    datasetWorks: "Roadwork",
+    datasetAvis: "Notices and alerts",
+    avisHuman: "City notices",
     navMap: "Map",
     navSubscribe: "Subscribe",
     navParks: "MHM parks",
@@ -506,7 +562,7 @@ export function dateRangeText(work, lang) {
     : `From ${startLabel} to ${endLabel}.`;
 }
 
-export function formatImport(iso, lang) {
+export function formatImport(iso, lang, label) {
   const copy = COPY[lang];
   if (!iso) return copy.importUnknown;
   const date = new Date(iso);
@@ -517,7 +573,12 @@ export function formatImport(iso, lang) {
     timeStyle: "short",
   }).format(date);
   const sep = lang === "fr" ? " : " : ": ";
-  return `${copy.imported}${sep}${formatted}`;
+  return `${label || copy.imported}${sep}${formatted}`;
+}
+
+export function avisTypeLabel(type, lang) {
+  const copy = COPY[lang];
+  return (copy.avisType && copy.avisType[type]) || type || copy.unknown;
 }
 
 export function geoErrorKey(error) {

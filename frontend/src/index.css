@@ -84,6 +84,76 @@ h1 {
   font-size: 1.05rem;
 }
 
+.disclaimer {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.legend .swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 999px;
+  vertical-align: -1px;
+}
+
+.legend .swatch.work { background: #ea580c; }
+.legend .swatch.avis { background: #047857; }
+
+.kind-pill {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.kind-pill.work {
+  background: #fff1e6;
+  color: #9a3412;
+}
+
+.kind-pill.avis {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+html.dark .kind-pill.work {
+  background: #3b2416;
+  color: #fdba74;
+}
+
+html.dark .kind-pill.avis {
+  background: #14532d;
+  color: #6ee7b7;
+}
+
+.notice-link {
+  display: inline-block;
+  margin-top: 12px;
+  font-weight: 700;
+  color: #047857;
+}
+
+html.dark .notice-link { color: #6ee7b7; }
+
+.site-list button.avis-item.active { background: #ecfdf5; }
+html.dark .site-list button.avis-item.active { background: #14532d; }
+
 .lang {
   display: flex;
   border: 2px solid var(--navy);

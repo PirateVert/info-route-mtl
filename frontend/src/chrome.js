@@ -193,7 +193,7 @@ export function Header({ lang, setLang }) {
   );
 }
 
-export function Footer({ lang, importedAt, formatImport }) {
+export function Footer({ lang, importedAt, avisImportedAt, formatImport }) {
   const copy = COPY[lang];
   return (
     <footer className="site-footer">
@@ -209,9 +209,16 @@ export function Footer({ lang, importedAt, formatImport }) {
         <span className="footer-badge">Montréal · 2026</span>
       </div>
       <p className="footer-data">
-        {formatImport(importedAt, lang)}
+        {formatImport(importedAt, lang, copy.importedWorks)}
+        {avisImportedAt ? ` · ${formatImport(avisImportedAt, lang, copy.importedAvis)}` : ""}
         {" · "}
-        <a href="https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d">{copy.dataset}</a>
+        <a href="https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d">{copy.datasetWorks}</a>
+        {" · "}
+        <a href="https://donnees.montreal.ca/dataset/avis-alertes">{copy.datasetAvis}</a>
+        {" · "}
+        <a href="https://montreal.ca/avis-et-alertes">{copy.avisHuman}</a>
+        {" · "}
+        <a href="https://creativecommons.org/licenses/by/4.0/">CC-BY 4.0</a>
         {" · "}
         <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
       </p>

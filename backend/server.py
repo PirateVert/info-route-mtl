@@ -1,4 +1,4 @@
-"""Info-Route MTL API. Reads the JSON store written by import_roadwork.py."""
+"""Info-Route MTL API. Reads stores written by import_roadwork.py and import_avis.py."""
 
 from __future__ import annotations
 
@@ -34,9 +34,14 @@ def _load_env(path: Path) -> None:
 _load_env(ROOT / ".env")
 
 STORE_PATH = ROOT / "data" / "roadwork.json"
+AVIS_PATH = ROOT / "data" / "avis.json"
 FRONTEND_BUILD = ROOT.parent / "frontend" / "build"
 BOROUGH_FIELD = "boroughid"
 MHM = "Mercier-Hochelaga-Maisonneuve"
+ROADWORK_PAGE = "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d"
+AVIS_PAGE = "https://donnees.montreal.ca/dataset/avis-alertes"
+AVIS_HUMAN_URL = "https://montreal.ca/avis-et-alertes"
+LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
 DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 NOMINATIM_UA = "Info-Route MTL/1.0 (citizen roadwork map; Montreal)"
 NEARBY_RADIUS_M = 500
@@ -59,6 +64,7 @@ app.add_middleware(
 )
 
 _cache: dict = {"mtime": None, "data": None}
+_avis_cache: dict = {"mtime": None, "data": None}
 _geocode_cache: dict[str, dict | None] = {}
 
 
@@ -73,6 +79,30 @@ def load_store() -> dict:
         _cache["data"] = json.loads(STORE_PATH.read_text(encoding="utf-8"))
         _cache["mtime"] = mtime
     return _cache["data"]
+
+
+def load_avis_store() -> dict:
+    empty = {
+        "imported_at": None,
+        "source_url": None,
+        "source_page": AVIS_PAGE,
+        "human_url": AVIS_HUMAN_URL,
+        "license": "CC-BY-4.0",
+        "types": ["Circulation et transport", "Stationnement"],
+        "count": 0,
+        "note": (
+            "Official City notices that can close a street or parking. "
+            "Not a complete inventory of events or demonstrations."
+        ),
+        "rows": [],
+    }
+    if not AVIS_PATH.is_file():
+        return empty
+    mtime = AVIS_PATH.stat().st_mtime
+    if _avis_cache["mtime"] != mtime:
+        _avis_cache["data"] = json.loads(AVIS_PATH.read_text(encoding="utf-8"))
+        _avis_cache["mtime"] = mtime
+    return _avis_cache["data"] or empty
 
 
 def _float(value: str | None) -> float | None:
@@ -91,6 +121,7 @@ def _truthy(value: str | None) -> bool:
 def project(row: dict) -> dict:
     return {
         "id": row.get("id") or "",
+        "kind": "work",
         "borough": row.get(BOROUGH_FIELD) or "",
         "street": row.get("occupancy_name") or "",
         "reason": row.get("reason_category") or "",
@@ -107,8 +138,33 @@ def project(row: dict) -> dict:
     }
 
 
+def project_avis(row: dict) -> dict:
+    title = row.get("titre") or ""
+    lat = row.get("lat")
+    lng = row.get("lng")
+    return {
+        "id": row.get("id") or "",
+        "kind": "avis",
+        "title": title,
+        "street": title,
+        "borough": row.get("borough") or "",
+        "type": row.get("type") or "",
+        "publisher": row.get("service_publieur") or "",
+        "start": row.get("date_debut") or "",
+        "end": row.get("date_fin") or "",
+        "url": row.get("lien") or "",
+        "lat": lat if isinstance(lat, (int, float)) else _float(lat),
+        "lng": lng if isinstance(lng, (int, float)) else _float(lng),
+        "geometry": row.get("geometry_type") or "",
+    }
+
+
 def all_works() -> list[dict]:
     return [project(row) for row in load_store().get("rows", [])]
+
+
+def all_avis() -> list[dict]:
+    return [project_avis(row) for row in load_avis_store().get("rows", [])]
 
 
 def fold(text: str) -> str:
@@ -204,10 +260,10 @@ def with_distance(work: dict, place: dict | None) -> dict:
 
 def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list[dict]:
     results: dict[str, dict] = {}
-    for work in all_works():
+    for work in [*all_works(), *all_avis()]:
         street_hit = False
         if tokens:
-            folded_street = fold(work["street"])
+            folded_street = fold(work.get("street") or work.get("title") or "")
             street_hit = all(token in folded_street for token in tokens)
 
         nearby_hit = False
@@ -227,7 +283,7 @@ def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list
         key=lambda item: (
             item["distance_m"] is None,
             item["distance_m"] if item["distance_m"] is not None else 10**9,
-            item["street"],
+            item.get("street") or item.get("title") or "",
         ),
     )
 
@@ -236,18 +292,35 @@ def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list
 @app.get("/api/")
 def health():
     store_ok = STORE_PATH.is_file()
-    return {"ok": True, "service": "info-route-mtl", "data_ready": store_ok}
+    return {
+        "ok": True,
+        "service": "info-route-mtl",
+        "data_ready": store_ok,
+        "avis_ready": AVIS_PATH.is_file(),
+    }
 
 
 @app.get("/api/meta")
 def meta():
     store = load_store()
+    avis = load_avis_store()
     counts = Counter((row.get(BOROUGH_FIELD) or "") for row in store.get("rows", []))
     boroughs = [
         {"name": name, "count": count}
         for name, count in sorted(counts.items(), key=lambda item: item[0])
         if name
     ]
+    avis_meta = {
+        "imported_at": avis.get("imported_at"),
+        "count": avis.get("count", 0),
+        "source_url": avis.get("source_url"),
+        "source_page": avis.get("source_page", AVIS_PAGE),
+        "human_url": avis.get("human_url", AVIS_HUMAN_URL),
+        "license": avis.get("license", "CC-BY-4.0"),
+        "license_url": LICENSE_URL,
+        "types": avis.get("types") or ["Circulation et transport", "Stationnement"],
+        "note": avis.get("note"),
+    }
     return {
         "imported_at": store.get("imported_at"),
         "count": store.get("count", 0),
@@ -256,6 +329,54 @@ def meta():
         "boroughs": boroughs,
         "source_url": store.get("source_url"),
         "license": store.get("license", "CC-BY-4.0"),
+        "license_url": LICENSE_URL,
+        "attribution": "Ville de Montréal",
+        "avis": avis_meta,
+        "sources": [
+            {
+                "id": "roadwork",
+                "name": "Entraves et travaux en cours",
+                "url": store.get("source_url"),
+                "page": ROADWORK_PAGE,
+                "license": store.get("license", "CC-BY-4.0"),
+                "license_url": LICENSE_URL,
+                "attribution": "Ville de Montréal",
+                "imported_at": store.get("imported_at"),
+                "count": store.get("count", 0),
+            },
+            {
+                "id": "avis",
+                "name": "Avis et alertes",
+                "url": avis_meta["source_url"],
+                "page": avis_meta["source_page"],
+                "human_url": avis_meta["human_url"],
+                "license": avis_meta["license"],
+                "license_url": LICENSE_URL,
+                "attribution": "Ville de Montréal",
+                "imported_at": avis_meta["imported_at"],
+                "count": avis_meta["count"],
+                "note": avis_meta["note"],
+            },
+        ],
+    }
+
+
+@app.get("/api/avis")
+def avis(borough: str | None = None):
+    rows = all_avis()
+    if borough:
+        rows = [row for row in rows if row["borough"] == borough]
+    store = load_avis_store()
+    return {
+        "count": len(rows),
+        "borough": borough or "",
+        "imported_at": store.get("imported_at"),
+        "source_page": store.get("source_page", AVIS_PAGE),
+        "human_url": store.get("human_url", AVIS_HUMAN_URL),
+        "license": store.get("license", "CC-BY-4.0"),
+        "types": store.get("types") or ["Circulation et transport", "Stationnement"],
+        "note": store.get("note"),
+        "avis": rows,
     }
 
 
