@@ -8,6 +8,7 @@ import {
   dateRangeText,
   formatDistance,
   formatImport,
+  geoErrorKey,
   readLang,
   reasonLabel,
   scheduleText,
@@ -19,9 +20,26 @@ async function getJson(path) {
   const base = process.env.REACT_APP_BACKEND_URL || "";
   const response = await fetch(`${base}${path}`);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    let detail = "";
+    try {
+      const payload = await response.json();
+      detail = payload.detail || "";
+    } catch (err) {
+      /* ignore */
+    }
+    const error = new Error(detail || `HTTP ${response.status}`);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
   return response.json();
+}
+
+function errorMessage(copy, error) {
+  if (!error) return copy.loadError;
+  if (error.detail === "outside_montreal" || error.detail === "bad_coords") return copy.geoOutside;
+  if (copy[error]) return copy[error];
+  return copy.loadError;
 }
 
 export default function App() {
@@ -37,6 +55,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [search, setSearch] = useState(null);
   const [selectedId, setSelectedId] = useState("");
 
@@ -54,7 +73,7 @@ export default function App() {
         setImportedAt(data.imported_at || "");
       })
       .catch(() => {
-        if (!cancel) setError("load");
+        if (!cancel) setError("loadError");
       });
     return () => {
       cancel = true;
@@ -74,7 +93,7 @@ export default function App() {
       })
       .catch(() => {
         if (cancel) return;
-        setError("load");
+        setError("loadError");
         setLoading(false);
       });
     return () => {
@@ -95,6 +114,12 @@ export default function App() {
     }
   }
 
+  async function runCoordSearch(lat, lng) {
+    const data = await getJson(`/api/search?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+    setSearch(data);
+    setSelectedId("");
+  }
+
   async function onSearch(event) {
     event.preventDefault();
     const text = query.trim();
@@ -106,10 +131,38 @@ export default function App() {
       setSearch(data);
       setSelectedId("");
     } catch (err) {
-      setError("load");
+      setError("loadError");
     } finally {
       setSearching(false);
     }
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      setError("geoUnsupported");
+      return;
+    }
+    setLocating(true);
+    setSearching(true);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          await runCoordSearch(position.coords.latitude, position.coords.longitude);
+        } catch (err) {
+          setError(err.detail === "outside_montreal" || err.detail === "bad_coords" ? "geoOutside" : "loadError");
+        } finally {
+          setLocating(false);
+          setSearching(false);
+        }
+      },
+      (err) => {
+        setLocating(false);
+        setSearching(false);
+        setError(geoErrorKey(err));
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
   }
 
   function clearSearch() {
@@ -123,7 +176,13 @@ export default function App() {
     () => shown.find((work) => work.id === selectedId) || null,
     [shown, selectedId]
   );
-  const fitToken = search ? `search:${search.query}:${search.place?.lat || ""}` : `borough:${borough}`;
+  const here = useMemo(() => {
+    if (search?.place?.source !== "coords") return null;
+    return { lat: search.place.lat, lng: search.place.lng, label: copy.youAreHere };
+  }, [search, copy.youAreHere]);
+  const fitToken = search
+    ? `search:${search.query}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.source || ""}`
+    : `borough:${borough}`;
 
   const boroughOptions = useMemo(() => {
     const names = new Set(boroughs);
@@ -152,8 +211,16 @@ export default function App() {
             placeholder={copy.searchPlaceholder}
             autoComplete="off"
           />
-          <button type="submit" disabled={searching}>
-            {searching ? copy.searching : copy.searchButton}
+          <button type="submit" className="search-go" disabled={searching}>
+            {searching && !locating ? copy.searching : copy.searchButton}
+          </button>
+          <button
+            type="button"
+            className="locate-button"
+            disabled={searching}
+            onClick={useMyLocation}
+          >
+            {locating ? copy.locating : copy.useMyLocation}
           </button>
         </div>
       </form>
@@ -184,15 +251,22 @@ export default function App() {
         )}
       </div>
 
-      {error && <p className="banner">{copy.loadError}</p>}
+      {error && <p className="banner">{errorMessage(copy, error)}</p>}
 
       <div className="layout">
         <div className="map-wrap">
-          <WorkMap works={shown} selectedId={selectedId} onSelect={selectWork} fitToken={fitToken} />
+          <WorkMap
+            works={shown}
+            selectedId={selectedId}
+            onSelect={selectWork}
+            fitToken={fitToken}
+            here={here}
+          />
         </div>
 
         <section className="side">
-          {search?.place && (
+          {here && <p className="place here-hint">{copy.youAreHere}</p>}
+          {search?.place && !here && (
             <p className="place">
               {copy.placeFound} : {search.place.label}
             </p>
@@ -228,7 +302,9 @@ export default function App() {
           )}
 
           <h3>{search ? copy.resultsTitle : copy.listTitle}</h3>
-          {search && shown.length === 0 && <p className="hint">{copy.noResults}</p>}
+          {search && shown.length === 0 && (
+            <p className="hint">{here ? copy.noResultsHere : copy.noResults}</p>
+          )}
           <ul className="site-list">
             {shown.map((work) => (
               <li key={work.id}>

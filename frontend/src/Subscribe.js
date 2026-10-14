@@ -4,12 +4,13 @@ import { navigate } from "./chrome";
 
 const ALERT_KEYS = ["new", "ending", "dates", "status", "who", "reason"];
 const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"];
-const PLACE_TYPES = ["route", "street", "address", "intersection"];
+const PLACE_TYPES = ["route", "street", "address", "intersection", "near_me"];
 const MAX_PLACES = 10;
 
 function placeLabel(place) {
   if (place.type === "route") return `${place.query} → ${place.via}`;
   if (place.type === "intersection") return `${place.query} × ${place.via}`;
+  if (place.type === "near_me") return place.via || place.query;
   return place.query;
 }
 
@@ -46,17 +47,17 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
   const [via, setVia] = useState("");
   const [adding, setAdding] = useState(false);
   const needsVia = kind === "route" || kind === "intersection";
+  const isNearMe = kind === "near_me";
 
-  async function addPlace(event) {
-    event.preventDefault();
+  async function savePlace(next) {
     if (places.length >= MAX_PLACES) {
       setError(copy.errors.too_many_places);
+      setAdding(false);
       return;
     }
     setAdding(true);
     setError("");
     try {
-      const next = { type: kind, query: query.trim(), via: via.trim() };
       await sendJson("/api/subscribe/preview", {
         method: "POST",
         body: JSON.stringify({ places: [...places, next] }),
@@ -69,6 +70,42 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
     } finally {
       setAdding(false);
     }
+  }
+
+  async function addPlace(event) {
+    event.preventDefault();
+    await savePlace({ type: kind, query: query.trim(), via: via.trim() });
+  }
+
+  function addNearMe() {
+    if (!navigator.geolocation) {
+      setError(copy.errors.geo_unsupported);
+      return;
+    }
+    if (places.length >= MAX_PLACES) {
+      setError(copy.errors.too_many_places);
+      return;
+    }
+    setAdding(true);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        await savePlace({
+          type: "near_me",
+          query: `${lat.toFixed(6)},${lng.toFixed(6)}`,
+          via: copy.placeHereLabel,
+        });
+      },
+      (err) => {
+        setAdding(false);
+        if (err.code === 1) setError(copy.errors.geo_denied);
+        else if (err.code === 3) setError(copy.errors.geo_timeout);
+        else setError(copy.errors.geo_unavailable);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
   }
 
   return (
@@ -98,6 +135,12 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
               <option key={item} value={item}>{copy.placeType[item]}</option>
             ))}
           </select>
+          {isNearMe ? (
+            <button type="button" className="text-button" disabled={adding} onClick={addNearMe}>
+              {adding ? copy.addingPlace : copy.useMyLocation}
+            </button>
+          ) : (
+            <>
           <label htmlFor="place-query">{copy.placeQuery[kind]}</label>
           <input
             id="place-query"
@@ -119,6 +162,8 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
           <button type="button" className="text-button" disabled={adding || !query.trim() || (needsVia && !via.trim())} onClick={addPlace}>
             {adding ? copy.addingPlace : copy.addPlace}
           </button>
+            </>
+          )}
         </div>
       )}
     </div>

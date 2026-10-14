@@ -63,6 +63,15 @@ export const COPY = {
     searchPlaceholder: "Ex. rue Ontario, Hochelaga, 4200 rue Notre-Dame",
     searchButton: "Chercher",
     searching: "Recherche…",
+    useMyLocation: "Utiliser ma position",
+    locating: "Localisation…",
+    youAreHere: "Vous êtes ici",
+    noResultsHere: "Aucun chantier à proximité de votre position.",
+    geoDenied: "La localisation a été refusée. Autorisez-la dans le navigateur, ou tapez une adresse.",
+    geoUnavailable: "Impossible d'obtenir votre position. Réessayez, ou tapez une adresse.",
+    geoTimeout: "La localisation a pris trop de temps. Réessayez, ou tapez une adresse.",
+    geoUnsupported: "Ce navigateur ne permet pas la localisation. Tapez une adresse.",
+    geoOutside: "Votre position n'est pas à Montréal.",
     clearSearch: "Revenir à la carte de l'arrondissement",
     boroughLabel: "Arrondissement",
     allBoroughs: "Tous les arrondissements",
@@ -123,19 +132,23 @@ export const COPY = {
       borough: "Arrondissement",
       allBoroughs: "Tous les arrondissements",
       placesTitle: "Lieux suivis",
-      placesHelp: (n) => `${n} / 10 trajets, rues, adresses ou intersections enregistrés.`,
+      placesHelp: (n) => `${n} / 10 trajets, rues, adresses, intersections ou votre position.`,
       placeKind: "Type de lieu",
       placeType: {
         route: "Trajet",
         street: "Rue",
         address: "Adresse",
         intersection: "Intersection",
+        near_me: "Ma position",
       },
+      placeHereLabel: "Ma position",
+      useMyLocation: "Utiliser ma position",
       placeQuery: {
         route: "Départ",
         street: "Rue",
         address: "Adresse",
         intersection: "Première rue",
+        near_me: "Position",
       },
       placeVia: {
         route: "Arrivée",
@@ -182,6 +195,12 @@ export const COPY = {
         place_not_found: "Ce lieu n'a pas été trouvé à Montréal.",
         too_many_places: "Vous pouvez enregistrer jusqu'à 10 lieux.",
         bad_place: "Ce type de lieu n'est pas reconnu.",
+        geo_denied: "La localisation a été refusée. Autorisez-la dans le navigateur.",
+        geo_unavailable: "Impossible d'obtenir votre position. Réessayez.",
+        geo_timeout: "La localisation a pris trop de temps. Réessayez.",
+        geo_unsupported: "Ce navigateur ne permet pas la localisation.",
+        geo_outside: "Votre position n'est pas à Montréal.",
+        outside_montreal: "Votre position n'est pas à Montréal.",
         bad_email: "Entrez un courriel valide.",
         checkout_failed: "Le paiement n'a pas pu démarrer. Réessayez.",
         bad_token: "Ce lien de gestion n'est pas valide.",
@@ -197,6 +216,15 @@ export const COPY = {
     searchPlaceholder: "e.g. Ontario Street, Hochelaga, 4200 Notre-Dame",
     searchButton: "Search",
     searching: "Searching…",
+    useMyLocation: "Use my location",
+    locating: "Locating…",
+    youAreHere: "You are here",
+    noResultsHere: "No work sites near your location.",
+    geoDenied: "Location was denied. Allow it in the browser, or type an address.",
+    geoUnavailable: "Your location could not be found. Try again, or type an address.",
+    geoTimeout: "Finding your location took too long. Try again, or type an address.",
+    geoUnsupported: "This browser cannot share your location. Type an address.",
+    geoOutside: "Your location is not in Montreal.",
     clearSearch: "Back to the borough map",
     boroughLabel: "Borough",
     allBoroughs: "All boroughs",
@@ -256,19 +284,23 @@ export const COPY = {
       borough: "Borough",
       allBoroughs: "All boroughs",
       placesTitle: "Watched places",
-      placesHelp: (n) => `${n} / 10 saved routes, streets, addresses, or intersections.`,
+      placesHelp: (n) => `${n} / 10 saved routes, streets, addresses, intersections, or your location.`,
       placeKind: "Place type",
       placeType: {
         route: "Route",
         street: "Street",
         address: "Address",
         intersection: "Intersection",
+        near_me: "My location",
       },
+      placeHereLabel: "My location",
+      useMyLocation: "Use my location",
       placeQuery: {
         route: "Start",
         street: "Street",
         address: "Address",
         intersection: "First street",
+        near_me: "Location",
       },
       placeVia: {
         route: "End",
@@ -315,6 +347,12 @@ export const COPY = {
         place_not_found: "That place was not found in Montreal.",
         too_many_places: "You can save up to 10 places.",
         bad_place: "That place type is not recognized.",
+        geo_denied: "Location was denied. Allow it in the browser.",
+        geo_unavailable: "Your location could not be found. Try again.",
+        geo_timeout: "Finding your location took too long. Try again.",
+        geo_unsupported: "This browser cannot share your location.",
+        geo_outside: "Your location is not in Montreal.",
+        outside_montreal: "Your location is not in Montreal.",
         bad_email: "Enter a valid email.",
         checkout_failed: "Checkout could not start. Try again.",
         bad_token: "This manage link is not valid.",
@@ -480,6 +518,14 @@ export function formatImport(iso, lang) {
   }).format(date);
   const sep = lang === "fr" ? " : " : ": ";
   return `${copy.imported}${sep}${formatted}`;
+}
+
+export function geoErrorKey(error) {
+  if (!error) return "geoUnavailable";
+  if (error.code === 1) return "geoDenied";
+  if (error.code === 2) return "geoUnavailable";
+  if (error.code === 3) return "geoTimeout";
+  return "geoUnavailable";
 }
 
 export function formatDistance(meters, lang) {

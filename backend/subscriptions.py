@@ -22,7 +22,7 @@ PRICE_CENTS = 200
 ALERTS = ("new", "ending", "dates", "status", "who", "reason")
 FREQUENCIES = ("daily", "weekly", "biweekly", "monthly")
 LANGS = ("fr", "en", "both")
-PLACE_TYPES = ("route", "street", "address", "intersection")
+PLACE_TYPES = ("route", "street", "address", "intersection", "near_me")
 MAX_PLACES = 10
 ROUTE_RADIUS_M = 400
 ADDRESS_RADIUS_M = 250
@@ -104,6 +104,16 @@ def _clean_place(raw: PlaceIn | dict) -> dict:
         raise HTTPException(status_code=400, detail="place_not_found")
     import server
 
+    if kind == "near_me":
+        point = server.parse_coord_pair(query)
+        if point is None:
+            raise HTTPException(status_code=400, detail="outside_montreal")
+        label = via or f"{point['lat']},{point['lng']}"
+        return {
+            "type": kind,
+            "query": f"{point['lat']},{point['lng']}",
+            "via": label[:120],
+        }
     if kind == "street":
         if not server.street_tokens(query) and server.geocode(query) is None:
             raise HTTPException(status_code=400, detail="place_not_found")
@@ -170,6 +180,8 @@ def _place_label(place: dict) -> str:
         return f"{place['query']} → {place['via']}"
     if place["type"] == "intersection":
         return f"{place['query']} × {place['via']}"
+    if place["type"] == "near_me":
+        return place["via"] or place["query"]
     return place["query"]
 
 
@@ -255,6 +267,9 @@ def _match_place(works: list[dict], place: dict) -> list[dict]:
             if _tokens_hit(folded, query) or _nearby(work, point, server.NEARBY_RADIUS_M):
                 chosen.append(work)
         return chosen
+    if kind == "near_me":
+        point = server.parse_coord_pair(query)
+        return [work for work in works if _nearby(work, point, server.NEARBY_RADIUS_M)]
     if kind == "address":
         point = server.geocode(query)
         return [work for work in works if _nearby(work, point, ADDRESS_RADIUS_M)]

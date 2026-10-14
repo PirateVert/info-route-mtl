@@ -40,6 +40,9 @@ MHM = "Mercier-Hochelaga-Maisonneuve"
 DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 NOMINATIM_UA = "Info-Route MTL/1.0 (citizen roadwork map; Montreal)"
 NEARBY_RADIUS_M = 500
+# Coordinate search starts at 500 m. If nothing is found, expand once so a
+# visitor standing just outside a cluster still sees nearby work.
+NEARBY_FALLBACK_RADIUS_M = 1000
 STOP_WORDS = {
     "rue", "street", "avenue", "ave", "av", "boul", "boulevard", "blvd",
     "chemin", "ch", "place", "pl", "de", "du", "des", "la", "le", "les",
@@ -132,6 +135,21 @@ def in_montreal(lat: float, lng: float) -> bool:
     return 45.40 <= lat <= 45.72 and -73.98 <= lng <= -73.47
 
 
+def parse_coord_pair(text: str) -> dict | None:
+    """Parse 'lat,lng' and accept the point only if it is in Montreal."""
+    parts = [part.strip() for part in (text or "").split(",")]
+    if len(parts) != 2:
+        return None
+    try:
+        lat = float(parts[0])
+        lng = float(parts[1])
+    except ValueError:
+        return None
+    if not in_montreal(lat, lng):
+        return None
+    return {"lat": lat, "lng": lng}
+
+
 def geocode(query: str) -> dict | None:
     key = fold(query)
     if key in _geocode_cache:
@@ -184,6 +202,36 @@ def with_distance(work: dict, place: dict | None) -> dict:
     return item
 
 
+def search_works(place: dict | None, tokens: list[str], radius_m: float) -> list[dict]:
+    results: dict[str, dict] = {}
+    for work in all_works():
+        street_hit = False
+        if tokens:
+            folded_street = fold(work["street"])
+            street_hit = all(token in folded_street for token in tokens)
+
+        nearby_hit = False
+        if place and work["lat"] is not None and work["lng"] is not None:
+            distance = haversine(place["lat"], place["lng"], work["lat"], work["lng"])
+            nearby_hit = distance <= radius_m
+
+        if not street_hit and not nearby_hit:
+            continue
+
+        item = with_distance(work, place)
+        item["match"] = "street" if street_hit else "nearby"
+        results[work["id"]] = item
+
+    return sorted(
+        results.values(),
+        key=lambda item: (
+            item["distance_m"] is None,
+            item["distance_m"] if item["distance_m"] is not None else 10**9,
+            item["street"],
+        ),
+    )
+
+
 @app.get("/api")
 @app.get("/api/")
 def health():
@@ -225,46 +273,43 @@ def works(borough: str | None = None):
 
 
 @app.get("/api/search")
-def search(q: str = Query(..., min_length=1, max_length=200)):
-    query = q.strip()
-    if not query:
+def search(
+    q: str | None = Query(None, max_length=200),
+    lat: float | None = Query(None),
+    lng: float | None = Query(None),
+):
+    query = (q or "").strip()
+    from_coords = lat is not None or lng is not None
+    place = None
+    tokens: list[str] = []
+    radius_m = NEARBY_RADIUS_M
+
+    if from_coords:
+        if lat is None or lng is None:
+            raise HTTPException(status_code=400, detail="bad_coords")
+        if not in_montreal(lat, lng):
+            raise HTTPException(status_code=400, detail="outside_montreal")
+        place = {
+            "label": query,
+            "lat": lat,
+            "lng": lng,
+            "source": "coords",
+        }
+    elif query:
+        place = geocode(query)
+        tokens = street_tokens(query)
+    else:
         raise HTTPException(status_code=400, detail="Empty query")
 
-    place = geocode(query)
-    tokens = street_tokens(query)
-    results: dict[str, dict] = {}
+    ordered = search_works(place, tokens, radius_m)
+    if from_coords and not ordered:
+        radius_m = NEARBY_FALLBACK_RADIUS_M
+        ordered = search_works(place, tokens, radius_m)
 
-    for work in all_works():
-        street_hit = False
-        if tokens:
-            folded_street = fold(work["street"])
-            street_hit = all(token in folded_street for token in tokens)
-
-        distance = None
-        nearby_hit = False
-        if place and work["lat"] is not None and work["lng"] is not None:
-            distance = haversine(place["lat"], place["lng"], work["lat"], work["lng"])
-            nearby_hit = distance <= NEARBY_RADIUS_M
-
-        if not street_hit and not nearby_hit:
-            continue
-
-        item = with_distance(work, place)
-        item["match"] = "street" if street_hit else "nearby"
-        results[work["id"]] = item
-
-    ordered = sorted(
-        results.values(),
-        key=lambda item: (
-            item["distance_m"] is None,
-            item["distance_m"] if item["distance_m"] is not None else 10**9,
-            item["street"],
-        ),
-    )
     return {
         "query": query,
         "place": place,
-        "radius_m": NEARBY_RADIUS_M,
+        "radius_m": radius_m,
         "count": len(ordered[:40]),
         "results": ordered[:40],
     }
