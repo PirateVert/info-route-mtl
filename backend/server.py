@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import unicodedata
 import urllib.parse
@@ -13,7 +14,7 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -86,13 +87,50 @@ STOP_WORDS = {
     "nord", "sud", "est", "ouest",
 }
 
-app = FastAPI(title="Info-Route MTL", docs_url=None, redoc_url=None)
+app = FastAPI(title="Info-Route MTL", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
+
+# Paid-alert routes stay off the import path. Render health-checks GET /api/
+# and must see 2xx within 5s; uvicorn does not bind PORT until this module
+# finishes importing. Load subscriptions only when /api/subscribe* is hit.
+_subscribe_lock = threading.Lock()
+_subscribe_loaded = False
+
+
+def _install_subscribe_routes() -> None:
+    global _subscribe_loaded
+    if _subscribe_loaded:
+        return
+    with _subscribe_lock:
+        if _subscribe_loaded:
+            return
+        from subscriptions import router as subscribe_router
+
+        existing = list(app.router.routes)
+        catch = next(
+            (
+                index
+                for index, route in enumerate(existing)
+                if getattr(route, "path", "") == "/{full_path:path}"
+            ),
+            len(existing),
+        )
+        app.include_router(subscribe_router)
+        added = app.router.routes[len(existing) :]
+        app.router.routes[:] = [*existing[:catch], *added, *existing[catch:]]
+        _subscribe_loaded = True
+
+
+@app.middleware("http")
+async def _lazy_subscribe_routes(request: Request, call_next):
+    if not _subscribe_loaded and request.url.path.startswith("/api/subscribe"):
+        _install_subscribe_routes()
+    return await call_next(request)
 
 _cache: dict = {"mtime": None, "data": None}
 _avis_cache: dict = {"mtime": None, "data": None}
@@ -589,10 +627,15 @@ def annotate_place_matches(works: list[dict], geom: dict | None, query: str, via
 @app.get("/api")
 @app.get("/api/")
 def health():
-    from places import snow_enabled
-
-    # File existence only — do not parse JSON here. Render health checks this
-    # path, and a free instance will be killed if boot or this handler is heavy.
+    # File existence only — do not parse JSON, geocode, or import places /
+    # subscriptions here. Render health-checks this path and restarts the
+    # instance if it does not 2xx within 5 seconds.
+    snow_on = (os.environ.get("SNOW_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     return {
         "ok": True,
         "service": "info-route-mtl",
@@ -600,7 +643,7 @@ def health():
         "avis_ready": AVIS_PATH.is_file(),
         "mtq_ready": MTQ_PATH.is_file(),
         "snow_lots_ready": SNOW_PATH.is_file(),
-        "snow_status_enabled": snow_enabled(),
+        "snow_status_enabled": snow_on,
     }
 
 
@@ -1005,11 +1048,6 @@ def _safe_build_file(full_path: str) -> Path | None:
         return target
     index = root / "index.html"
     return index if index.is_file() else None
-
-
-from subscriptions import router as subscribe_router
-
-app.include_router(subscribe_router)
 
 
 if FRONTEND_BUILD.is_dir():

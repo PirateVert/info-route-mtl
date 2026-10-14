@@ -6,6 +6,8 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    # HTTP health checks must 2xx/3xx within 5s. Blueprint YAML has no
+    # healthCheckGracePeriodSeconds (or similar) field — do not add one.
     healthCheckPath: /api/
     envVars:
       - key: APP_ORIGIN
