@@ -391,18 +391,21 @@ def ensure_snapshot() -> None:
 
     try:
         works = [*server.all_works(), *server.all_mtq()]
-    except HTTPException:
+        payload = {work["id"]: _fingerprint(work) for work in works if work.get("id")}
+        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNAPSHOT_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
         return
-    payload = {work["id"]: _fingerprint(work) for work in works if work.get("id")}
-    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SNAPSHOT_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _load_snapshot() -> dict:
     ensure_snapshot()
     if not SNAPSHOT_PATH.is_file():
         return {}
-    return json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    try:
+        return json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return {}
 
 
 def _ending_soon(work: dict) -> bool:

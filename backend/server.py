@@ -589,17 +589,17 @@ def annotate_place_matches(works: list[dict], geom: dict | None, query: str, via
 @app.get("/api")
 @app.get("/api/")
 def health():
-    store_ok = STORE_PATH.is_file()
     from places import snow_enabled
 
-    snow = load_snow_store()
+    # File existence only — do not parse JSON here. Render health checks this
+    # path, and a free instance will be killed if boot or this handler is heavy.
     return {
         "ok": True,
         "service": "info-route-mtl",
-        "data_ready": store_ok,
+        "data_ready": STORE_PATH.is_file(),
         "avis_ready": AVIS_PATH.is_file(),
         "mtq_ready": MTQ_PATH.is_file(),
-        "snow_lots_ready": bool(snow.get("available")),
+        "snow_lots_ready": SNOW_PATH.is_file(),
         "snow_status_enabled": snow_enabled(),
     }
 
@@ -1007,10 +1007,9 @@ def _safe_build_file(full_path: str) -> Path | None:
     return index if index.is_file() else None
 
 
-from subscriptions import ensure_snapshot, router as subscribe_router
+from subscriptions import router as subscribe_router
 
 app.include_router(subscribe_router)
-ensure_snapshot()
 
 
 if FRONTEND_BUILD.is_dir():
