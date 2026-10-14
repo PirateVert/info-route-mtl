@@ -92,26 +92,53 @@ h1 {
 }
 
 .legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
 }
 
+.legend-title {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0;
+}
+
+.legend-items span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .legend .swatch {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 6px;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
-  vertical-align: -1px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
 }
 
 .legend .swatch.work { background: #ea580c; }
 .legend .swatch.avis { background: #047857; }
 .legend .swatch.mtq { background: #7c3aed; }
+.legend .swatch.street { background: #dc2626; }
+.legend .swatch.lane { background: #f59e0b; }
+.legend .swatch.sidewalk { background: #0284c7; }
+.legend .swatch.parking { background: #ca8a04; }
+.legend .swatch.none { background: #94a3b8; }
+.legend .swatch.snow { background: #14b8a6; }
+
+html.dark .legend .swatch {
+  box-shadow: 0 0 0 1px rgba(244, 241, 234, 0.28);
+}
 
 .kind-pill {
   display: inline-block;
@@ -213,6 +240,59 @@ html.dark .notice-link.mtq-link { color: #c4b5fd; }
   gap: 8px;
 }
 
+.place-kind-bar {
+  margin-bottom: 8px;
+}
+
+.place-kind-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.place-kind-buttons button {
+  flex: 1 1 calc(50% - 8px);
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.place-kind-buttons button.active,
+.place-kind-buttons button[aria-pressed="true"] {
+  background: var(--navy);
+  color: #fff;
+}
+
+html.dark .place-kind-buttons button {
+  border-color: #94a3b8;
+  color: #e2e8f0;
+}
+
+html.dark .place-kind-buttons button.active,
+html.dark .place-kind-buttons button[aria-pressed="true"] {
+  background: #e8eef6;
+  color: #0f141b;
+  border-color: #e8eef6;
+}
+
+.replace-place {
+  margin-top: 12px;
+  padding: 12px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+}
+
+@media (min-width: 640px) {
+  .place-kind-buttons button {
+    flex: 1 1 calc(25% - 8px);
+  }
+}
+
 .search-row input {
   flex: 1 1 160px;
   min-width: 0;
@@ -268,7 +348,8 @@ html.dark .notice-link.mtq-link { color: #c4b5fd; }
   cursor: pointer;
 }
 
-.search button {
+.search button,
+button.search-go {
   border: 0;
   background: var(--orange);
   color: white;
@@ -276,7 +357,8 @@ html.dark .notice-link.mtq-link { color: #c4b5fd; }
   padding: 0 18px;
 }
 
-.search button:disabled { opacity: 0.7; cursor: wait; }
+.search button:disabled,
+button.search-go:disabled { opacity: 0.7; cursor: wait; }
 
 .search button.locate-button {
   border: 2px solid var(--navy);
@@ -284,10 +366,47 @@ html.dark .notice-link.mtq-link { color: #c4b5fd; }
   color: var(--navy);
 }
 
+.search .place-kind-buttons button {
+  border: 2px solid var(--navy);
+  background: transparent;
+  color: var(--navy);
+  font-weight: 700;
+  padding: 8px 10px;
+  min-height: 48px;
+}
+
+.search .place-kind-buttons button.active,
+.search .place-kind-buttons button[aria-pressed="true"] {
+  background: var(--navy);
+  color: #fff;
+}
+
+.search .replace-place a.text-button {
+  border: 2px solid var(--navy);
+  background: transparent;
+  color: var(--navy);
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 html.dark .search button.locate-button {
   border-color: #94a3b8;
   color: #e2e8f0;
   background: #0f172a;
+}
+
+html.dark .search .place-kind-buttons button {
+  border-color: #94a3b8;
+  color: #e2e8f0;
+  background: transparent;
+}
+
+html.dark .search .place-kind-buttons button.active,
+html.dark .search .place-kind-buttons button[aria-pressed="true"] {
+  background: #e8eef6;
+  color: #0f141b;
+  border-color: #e8eef6;
 }
 
 .here-hint {
@@ -647,8 +766,161 @@ html.dark .back-to-map { color: #6ee7b7; }
 .place-remove { min-height: 40px; padding: 0 12px; }
 .place-form { margin-top: 8px; }
 
+.home-places {
+  margin-top: 18px;
+  padding: 16px;
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+}
+
+.place-cards {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.place-card {
+  width: 100%;
+  text-align: left;
+  border: 3px solid #16a34a;
+  background: #f0fdf4;
+  border-radius: 16px;
+  padding: 14px 16px;
+  min-height: 88px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.place-card strong {
+  display: block;
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+.place-card-kind {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  color: var(--muted);
+}
+
+.place-card-snow {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.place-card.ok, .place-card.none { border-color: #16a34a; background: #f0fdf4; }
+.place-card.parking { border-color: #ca8a04; background: #fef9c3; }
+.place-card.street { border-color: #dc2626; background: #fee2e2; }
+.place-card.lane { border-color: #f59e0b; background: #fef3c7; }
+.place-card.sidewalk { border-color: #0284c7; background: #e0f2fe; }
+
+html.dark .place-card.ok, html.dark .place-card.none { background: #14532d; }
+html.dark .place-card.parking { background: #713f12; }
+html.dark .place-card.street { background: #7f1d1d; }
+html.dark .place-card.lane { background: #92400e; }
+html.dark .place-card.sidewalk { background: #0c4a6e; }
+
+.place-remove-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.suggest { position: relative; }
+.suggest input,
+.place-form select {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+}
+html.dark .suggest input,
+html.dark .place-form select {
+  background: #0f172a;
+  color: var(--ink);
+  border-color: #64748b;
+}
+.suggest-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--card);
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+  max-height: 240px;
+  overflow: auto;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+}
+.suggest-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: inherit;
+}
+.suggest-list button.active, .suggest-list button:hover { background: #fff1e6; }
+html.dark .suggest-list button.active, html.dark .suggest-list button:hover { background: #1e293b; }
+.suggest-label { display: block; font-weight: 700; }
+.suggest-detail { display: block; color: var(--muted); font-size: 0.85rem; }
+
+.search-pin { background: none; border: 0; }
+.search-pin-mark {
+  display: block;
+  width: 22px;
+  height: 22px;
+  margin: 0 auto;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: #1d4ed8;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+
+.kind-pill.street { background: #fee2e2; color: #b91c1c; }
+.kind-pill.lane { background: #fef3c7; color: #b45309; }
+.kind-pill.sidewalk { background: #e0f2fe; color: #075985; }
+.kind-pill.parking { background: #fef9c3; color: #854d0e; }
+.kind-pill.none { background: #e2e8f0; color: #475569; }
+html.dark .kind-pill.street { background: #7f1d1d; color: #fecaca; }
+html.dark .kind-pill.lane { background: #92400e; color: #fcd34d; }
+html.dark .kind-pill.sidewalk { background: #0c4a6e; color: #7dd3fc; }
+html.dark .kind-pill.parking { background: #713f12; color: #fde68a; }
+html.dark .kind-pill.none { background: #334155; color: #cbd5e1; }
+
+.site-list button.impact-street.active { background: #fee2e2; }
+.site-list button.impact-lane.active { background: #fef3c7; }
+html.dark .site-list button.impact-lane.active { background: #92400e; }
+.site-list button.impact-parking.active { background: #fef9c3; }
+.site-list button.impact-sidewalk.active { background: #e0f2fe; }
+.show-all { margin-top: 12px; }
+.signs-note { font-weight: 700; color: var(--muted); margin: 0 0 8px; }
+.snow-lots ul { margin: 8px 0 0; padding-left: 18px; }
+
 @media (max-width: 640px) {
-  .search button.locate-button { width: 100%; }
+  .search button.locate-button,
+  .search .search-row .search-go { width: 100%; }
 }
 
 @media (min-width: 800px) {
@@ -664,12 +936,14 @@ html.dark .back-to-map { color: #6ee7b7; }
     grid-template-columns: minmax(340px, 420px) 1fr;
     align-items: start;
   }
-  .map-wrap {
+  .map-panel {
     order: 2;
-    height: calc(100vh - 280px);
-    min-height: 560px;
     position: sticky;
     top: 80px;
+  }
+  .map-wrap {
+    height: calc(100vh - 360px);
+    min-height: 480px;
   }
   .side { order: 1; }
   .site-list { max-height: 32vh; }

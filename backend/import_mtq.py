@@ -179,6 +179,8 @@ def representative_point(geometry: dict | None) -> tuple[float | None, float | N
 
 
 def in_island_bbox(lat: float, lng: float) -> bool:
+    if lat == 0 and lng == 0:
+        return False
     return LAT_MIN <= lat <= LAT_MAX and LNG_MIN <= lng <= LNG_MAX
 
 
@@ -244,6 +246,8 @@ def project_feature(feature: dict, index: int) -> dict | None:
     if not geometry_on_island(geometry):
         return None
     lat, lng = representative_point(geometry)
+    if lat is None or lng is None or (lat == 0 and lng == 0) or not in_island_bbox(lat, lng):
+        lat, lng = None, None
     ident = prop(props, "identifiant", "id")
     works = prop(props, "identificationDesTravaux", "identification_des_travaux")
     localisation = prop(props, "localisation")

@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import time
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -16,6 +17,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from impacts import empty_flags, flags_from_avis, flags_from_mtq, impact_payload
 
 ROOT = Path(__file__).resolve().parent
 
@@ -36,18 +40,42 @@ _load_env(ROOT / ".env")
 STORE_PATH = ROOT / "data" / "roadwork.json"
 AVIS_PATH = ROOT / "data" / "avis.json"
 MTQ_PATH = ROOT / "data" / "mtq.json"
+SNOW_PATH = ROOT / "data" / "snow_lots.json"
 FRONTEND_BUILD = ROOT.parent / "frontend" / "build"
 BOROUGH_FIELD = "boroughid"
 MHM = "Mercier-Hochelaga-Maisonneuve"
 ROADWORK_PAGE = "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d"
+IMPACTS_URL = (
+    "https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d"
+    "/resource/a2bc8014-488c-495d-941b-e7ae1999d1bd/download/impacts-entraves-travaux-en-cours.csv"
+)
+SNOW_PAGE = "https://donnees.montreal.ca/dataset/stationnements-deneigement"
 AVIS_PAGE = "https://donnees.montreal.ca/dataset/avis-alertes"
 AVIS_HUMAN_URL = "https://montreal.ca/avis-et-alertes"
 MTQ_PAGE = "https://www.donneesquebec.ca/recherche/dataset/travaux-routiers"
 MTQ_HUMAN_URL = "https://www.quebec511.info"
 LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
 DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-NOMINATIM_UA = "Info-Route MTL/1.0 (citizen roadwork map; Montreal)"
+NOMINATIM_UA = "Info-Route MTL/1.0 (citizen place alerts; Montreal)"
 NEARBY_RADIUS_M = 500
+# Island of Montreal, including Pointe-aux-Trembles at the east tip.
+# The previous east bound (-73.47) rejected valid PAT results.
+MTL_LAT_MIN, MTL_LAT_MAX = 45.40, 45.72
+MTL_LNG_MIN, MTL_LNG_MAX = -73.99, -73.45
+NOMINATIM_VIEWBOX = f"{MTL_LNG_MIN},{MTL_LAT_MAX},{MTL_LNG_MAX},{MTL_LAT_MIN}"
+# Plotting extent: island plus Québec 511 bridge/tunnel approaches.
+# Wider than in_montreal() so Honoré-Mercier / A-40 still show. Null Island
+# (0, 0) in the Gulf of Guinea is never a Montreal site.
+MAP_LAT_MIN, MAP_LAT_MAX = 45.38, 45.73
+MAP_LNG_MIN, MAP_LNG_MAX = -74.05, -73.45
+ISLAND_NAMES = {
+    "montreal", "montréal", "westmount", "cote-saint-luc", "côte-saint-luc",
+    "montreal-ouest", "montréal-ouest", "montreal-est", "montréal-est",
+    "hampstead", "mont-royal", "ville mont-royal", "dorval", "pointe-claire",
+    "kirkland", "beaconsfield", "baie-d'urfe", "baie-d'urfé", "sainte-anne-de-bellevue",
+    "senneville", "dollard-des-ormeaux", "pointe-aux-trembles",
+    "riviere-des-prairies", "rivière-des-prairies",
+}
 # Coordinate search starts at 500 m. If nothing is found, expand once so a
 # visitor standing just outside a cluster still sees nearby work.
 NEARBY_FALLBACK_RADIUS_M = 1000
@@ -69,7 +97,10 @@ app.add_middleware(
 _cache: dict = {"mtime": None, "data": None}
 _avis_cache: dict = {"mtime": None, "data": None}
 _mtq_cache: dict = {"mtime": None, "data": None}
+_snow_cache: dict = {"mtime": None, "data": None}
 _geocode_cache: dict[str, dict | None] = {}
+_suggest_cache: dict[str, list] = {}
+_last_nominatim = 0.0
 
 
 def load_store() -> dict:
@@ -132,23 +163,93 @@ def load_mtq_store() -> dict:
     return _mtq_cache["data"] or empty
 
 
+def load_snow_store() -> dict:
+    empty = {
+        "imported_at": None,
+        "source_url": None,
+        "source_page": SNOW_PAGE,
+        "license": "CC-BY-4.0",
+        "available": False,
+        "count": 0,
+        "rows": [],
+    }
+    if not SNOW_PATH.is_file():
+        return empty
+    mtime = SNOW_PATH.stat().st_mtime
+    if _snow_cache["mtime"] != mtime:
+        _snow_cache["data"] = json.loads(SNOW_PATH.read_text(encoding="utf-8"))
+        _snow_cache["mtime"] = mtime
+    return _snow_cache["data"] or empty
+
+
 def _float(value: str | None) -> float | None:
     if value is None or str(value).strip() == "":
         return None
     try:
         return float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
+
+
+def map_point(lat, lng) -> tuple[float | None, float | None]:
+    """Keep coordinates only when they fall on the Montreal map.
+
+    Dummy GeoJSON points at lat=0, lng=0 (Null Island) are treated as missing.
+    """
+    lat_f = lat if isinstance(lat, (int, float)) else _float(lat)
+    lng_f = lng if isinstance(lng, (int, float)) else _float(lng)
+    if lat_f is None or lng_f is None:
+        return None, None
+    if not math.isfinite(lat_f) or not math.isfinite(lng_f):
+        return None, None
+    if lat_f == 0 and lng_f == 0:
+        return None, None
+    if not (MAP_LAT_MIN <= lat_f <= MAP_LAT_MAX and MAP_LNG_MIN <= lng_f <= MAP_LNG_MAX):
+        return None, None
+    return lat_f, lng_f
 
 
 def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"t", "true", "1", "yes", "vrai"}
 
 
+def project_hours(row: dict) -> list[dict]:
+    hours = []
+    for day in DAY_CODES:
+        if not _truthy(row.get(f"duration_days_{day}_active")):
+            continue
+        hours.append({
+            "day": day,
+            "all_day": _truthy(row.get(f"duration_days_{day}_all_day_round")),
+            "start": row.get(f"duration_days_{day}_start_time") or "",
+            "end": row.get(f"duration_days_{day}_end_time") or "",
+        })
+    return hours
+
+
+def _with_impact(item: dict, flags: dict) -> dict:
+    payload = impact_payload(flags)
+    item.update(payload)
+    return item
+
+
 def project(row: dict) -> dict:
-    return {
+    stored = row.get("impact")
+    if isinstance(stored, dict) and "closes" in stored:
+        flags = {
+            "street_closed": stored.get("street_closed"),
+            "lane_closed": stored.get("lane_closed"),
+            "sidewalk_closed": stored.get("sidewalk_closed"),
+            "no_parking": stored.get("no_parking"),
+            "streets": stored.get("streets") or [],
+        }
+    else:
+        flags = empty_flags()
+    lat, lng = map_point(row.get("latitude"), row.get("longitude"))
+    item = {
         "id": row.get("id") or "",
         "kind": "work",
+        "permit_id": row.get("permit_permit_id") or "",
         "borough": row.get(BOROUGH_FIELD) or "",
         "street": row.get("occupancy_name") or "",
         "reason": row.get("reason_category") or "",
@@ -157,19 +258,20 @@ def project(row: dict) -> dict:
         "status": row.get("currentstatus") or "",
         "start": row.get("duration_start_date") or "",
         "end": row.get("duration_end_date") or "",
-        "lat": _float(row.get("latitude")),
-        "lng": _float(row.get("longitude")),
+        "lat": lat,
+        "lng": lng,
         "active_days": [
             day for day in DAY_CODES if _truthy(row.get(f"duration_days_{day}_active"))
         ],
+        "hours": project_hours(row),
     }
+    return _with_impact(item, flags)
 
 
 def project_avis(row: dict) -> dict:
     title = row.get("titre") or ""
-    lat = row.get("lat")
-    lng = row.get("lng")
-    return {
+    lat, lng = map_point(row.get("lat"), row.get("lng"))
+    item = {
         "id": row.get("id") or "",
         "kind": "avis",
         "title": title,
@@ -180,10 +282,12 @@ def project_avis(row: dict) -> dict:
         "start": row.get("date_debut") or "",
         "end": row.get("date_fin") or "",
         "url": row.get("lien") or "",
-        "lat": lat if isinstance(lat, (int, float)) else _float(lat),
-        "lng": lng if isinstance(lng, (int, float)) else _float(lng),
+        "lat": lat,
+        "lng": lng,
         "geometry": row.get("geometry_type") or "",
+        "hours": [],
     }
+    return _with_impact(item, flags_from_avis(row))
 
 
 def all_works() -> list[dict]:
@@ -195,10 +299,9 @@ def project_mtq(row: dict) -> dict:
     localisation = row.get("localisation") or ""
     work = row.get("work") or ""
     route = row.get("route") or ""
-    lat = row.get("lat")
-    lng = row.get("lng")
+    lat, lng = map_point(row.get("lat"), row.get("lng"))
     street = " ".join(part for part in (route, localisation, work, title) if part)
-    return {
+    item = {
         "id": row.get("id") or "",
         "kind": "mtq",
         "title": title,
@@ -216,11 +319,13 @@ def project_mtq(row: dict) -> dict:
         "start": row.get("start") or "",
         "end": row.get("end") or "",
         "url": row.get("url") or MTQ_HUMAN_URL,
-        "lat": lat if isinstance(lat, (int, float)) else _float(lat),
-        "lng": lng if isinstance(lng, (int, float)) else _float(lng),
+        "lat": lat,
+        "lng": lng,
         "geometry": row.get("geometry") or None,
         "geometry_type": row.get("geometry_type") or "",
+        "hours": [],
     }
+    return _with_impact(item, flags_from_mtq(row))
 
 
 def all_avis() -> list[dict]:
@@ -256,7 +361,35 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def in_montreal(lat: float, lng: float) -> bool:
-    return 45.40 <= lat <= 45.72 and -73.98 <= lng <= -73.47
+    if lat == 0 and lng == 0:
+        return False
+    return MTL_LAT_MIN <= lat <= MTL_LAT_MAX and MTL_LNG_MIN <= lng <= MTL_LNG_MAX
+
+
+def on_island(item: dict) -> bool:
+    lat = float(item.get("lat") or 0)
+    lng = float(item.get("lon") or item.get("lng") or 0)
+    if not in_montreal(lat, lng):
+        return False
+    address = item.get("address") or {}
+    names = [
+        address.get("city"),
+        address.get("town"),
+        address.get("municipality"),
+        address.get("suburb"),
+        address.get("borough"),
+        address.get("city_district"),
+        address.get("neighbourhood"),
+        item.get("display_name"),
+    ]
+    blob = fold(" ".join(str(part or "") for part in names))
+    if "brantford" in blob or "ontario" in blob and "montreal" not in blob and "montréal" not in fold(item.get("display_name") or ""):
+        # Nominatim sometimes returns Ontario streets when unbounded.
+        if "montr" not in blob and "pointe-aux-trembles" not in blob:
+            return False
+    if any(name and fold(name) in ISLAND_NAMES for name in names[:-1]):
+        return True
+    return "montr" in blob or "pointe-aux-trembles" in blob or in_montreal(lat, lng)
 
 
 def parse_coord_pair(text: str) -> dict | None:
@@ -274,44 +407,75 @@ def parse_coord_pair(text: str) -> dict | None:
     return {"lat": lat, "lng": lng}
 
 
+def _nominatim_search(query: str, limit: int = 1, lang: str = "fr") -> list[dict]:
+    global _last_nominatim
+    looked_up = query
+    key = fold(query)
+    if "montr" not in key and "pointe-aux-trembles" not in key and "pointe aux trembles" not in key:
+        looked_up = f"{query}, Montréal, Québec"
+    params = urllib.parse.urlencode(
+        {
+            "q": looked_up,
+            "format": "jsonv2",
+            "limit": str(limit),
+            "addressdetails": 1,
+            "countrycodes": "ca",
+            "viewbox": NOMINATIM_VIEWBOX,
+            "bounded": 1,
+        }
+    )
+    wait = 1.05 - (time.time() - _last_nominatim)
+    if wait > 0:
+        time.sleep(wait)
+    request = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/search?{params}",
+        headers={
+            "User-Agent": NOMINATIM_UA,
+            "Accept-Language": "fr,en" if lang == "fr" else "en,fr",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        _last_nominatim = time.time()
+        return payload if isinstance(payload, list) else []
+    except Exception:
+        _last_nominatim = time.time()
+        return []
+
+
+def _short_label(item: dict) -> str:
+    address = item.get("address") or {}
+    parts = [
+        address.get("house_number"),
+        address.get("road") or address.get("pedestrian") or address.get("suburb") or address.get("neighbourhood"),
+        address.get("suburb") or address.get("city_district") or address.get("neighbourhood"),
+        address.get("city") or address.get("town") or address.get("municipality"),
+    ]
+    seen = []
+    for part in parts:
+        text = (part or "").strip()
+        if text and text not in seen:
+            seen.append(text)
+    return ", ".join(seen[:3]) or (item.get("display_name") or "").split(",")[0]
+
+
 def geocode(query: str) -> dict | None:
     key = fold(query)
     if key in _geocode_cache:
         return _geocode_cache[key]
 
-    looked_up = query if "montr" in key else f"{query}, Montréal, Québec"
-    params = urllib.parse.urlencode(
-        {
-            "q": looked_up,
-            "format": "jsonv2",
-            "limit": 1,
-            "countrycodes": "ca",
-            "viewbox": "-74.05,45.72,-73.45,45.40",
-            "bounded": 0,
-        }
-    )
-    request = urllib.request.Request(
-        f"https://nominatim.openstreetmap.org/search?{params}",
-        headers={
-            "User-Agent": NOMINATIM_UA,
-            "Accept-Language": "fr,en",
-        },
-    )
     place = None
-    try:
-        with urllib.request.urlopen(request, timeout=12) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if payload:
-            lat = float(payload[0]["lat"])
-            lng = float(payload[0]["lon"])
-            if in_montreal(lat, lng):
-                place = {
-                    "label": payload[0].get("display_name") or looked_up,
-                    "lat": lat,
-                    "lng": lng,
-                }
-    except Exception:
-        place = None
+    payload = _nominatim_search(query, limit=5)
+    for item in payload:
+        if not on_island(item):
+            continue
+        place = {
+            "label": _short_label(item),
+            "lat": float(item["lat"]),
+            "lng": float(item["lon"]),
+        }
+        break
 
     _geocode_cache[key] = place
     return place
@@ -424,12 +588,17 @@ def annotate_place_matches(works: list[dict], geom: dict | None, query: str, via
 @app.get("/api/")
 def health():
     store_ok = STORE_PATH.is_file()
+    from places import snow_enabled
+
+    snow = load_snow_store()
     return {
         "ok": True,
         "service": "info-route-mtl",
         "data_ready": store_ok,
         "avis_ready": AVIS_PATH.is_file(),
         "mtq_ready": MTQ_PATH.is_file(),
+        "snow_lots_ready": bool(snow.get("available")),
+        "snow_status_enabled": snow_enabled(),
     }
 
 
@@ -438,6 +607,8 @@ def meta():
     store = load_store()
     avis = load_avis_store()
     mtq = load_mtq_store()
+    snow = load_snow_store()
+    from places import FREE_PLACE_LIMIT, PAID_PLACE_LIMIT, snow_enabled
     counts = Counter((row.get(BOROUGH_FIELD) or "") for row in store.get("rows", []))
     boroughs = [
         {"name": name, "count": count}
@@ -478,6 +649,28 @@ def meta():
         "attribution": "Ville de Montréal",
         "avis": avis_meta,
         "mtq": mtq_meta,
+        "impacts": {
+            "source_url": store.get("impacts_url") or IMPACTS_URL,
+            "matched": store.get("impacts_matched"),
+            "closing_count": store.get("closing_count"),
+        },
+        "places": {
+            "free_max": FREE_PLACE_LIMIT,
+            "paid_max": PAID_PLACE_LIMIT,
+            "free_limit": FREE_PLACE_LIMIT,
+            "paid_limit": PAID_PLACE_LIMIT,
+            "free_save": True,
+            "free_alerts": False,
+            "radius_m": 100,
+            "paid_price_cad": 2,
+        },
+        "snow": {
+            "status_enabled": snow_enabled(),
+            "lots_available": bool(snow.get("available")),
+            "lots_count": snow.get("count", 0),
+            "imported_at": snow.get("imported_at"),
+            "source_page": snow.get("source_page", SNOW_PAGE),
+        },
         "sources": [
             {
                 "id": "roadwork",
@@ -502,6 +695,17 @@ def meta():
                 "imported_at": avis_meta["imported_at"],
                 "count": avis_meta["count"],
                 "note": avis_meta["note"],
+            },
+            {
+                "id": "impacts",
+                "name": "Impacts des entraves et travaux en cours",
+                "url": store.get("impacts_url") or IMPACTS_URL,
+                "page": ROADWORK_PAGE,
+                "license": store.get("license", "CC-BY-4.0"),
+                "license_url": LICENSE_URL,
+                "attribution": "Ville de Montréal",
+                "imported_at": store.get("imported_at"),
+                "count": store.get("impacts_count", 0),
             },
             {
                 "id": "mtq",
@@ -623,15 +827,25 @@ def search(
 
         if kind not in PLACE_TYPES:
             raise HTTPException(status_code=400, detail="bad_place")
-        cleaned = _clean_place({"type": kind, "query": query, "via": via_text})
+        packed = {"type": kind, "query": query, "via": via_text}
+        if lat is not None and lng is not None:
+            packed["lat"] = lat
+            packed["lng"] = lng
+        cleaned = _clean_place(packed)
         matched = _match_place(all_sites(), cleaned)
         geom = place_geometry(cleaned)
+        if lat is not None and lng is not None and geom.get("lat") is None:
+            geom["lat"] = lat
+            geom["lng"] = lng
         radius_m = {
             "street": NEARBY_RADIUS_M,
             "address": ADDRESS_RADIUS_M,
+            "home": ADDRESS_RADIUS_M,
+            "car": ADDRESS_RADIUS_M,
+            "work": ADDRESS_RADIUS_M,
             "intersection": INTERSECTION_RADIUS_M,
             "route": ROUTE_RADIUS_M,
-        }.get(kind, NEARBY_RADIUS_M)
+        }.get(kind, ADDRESS_RADIUS_M)
         ordered = annotate_place_matches(matched, geom, cleaned["query"], cleaned["via"])
         return {
             "query": cleaned["query"],
@@ -656,6 +870,125 @@ def search(
         "radius_m": radius_m,
         "count": len(ordered[:40]),
         "results": ordered[:40],
+    }
+
+
+class SavedPlaceIn(BaseModel):
+    id: str = ""
+    kind: str = "home"
+    type: str = ""
+    query: str = ""
+    via: str = ""
+    label: str = ""
+    lat: float | None = None
+    lng: float | None = None
+    end_lat: float | None = None
+    end_lng: float | None = None
+
+
+class PlacesStatusBody(BaseModel):
+    places: list[SavedPlaceIn] = Field(default_factory=list)
+    lang: str = "fr"
+    paid: bool = False
+
+
+class PlacesSaveBody(BaseModel):
+    places: list[SavedPlaceIn] = Field(default_factory=list)
+    paid: bool = False
+    replace: bool = False
+
+
+@app.get("/api/suggest")
+def suggest(q: str = Query("", max_length=200), lang: str = "fr"):
+    query = (q or "").strip()
+    if len(query) < 3:
+        return {"query": query, "suggestions": []}
+    cache_key = f"{fold(query)}|{lang}"
+    if cache_key in _suggest_cache:
+        return {"query": query, "suggestions": _suggest_cache[cache_key]}
+    payload = _nominatim_search(query, limit=8, lang=lang)
+    suggestions = []
+    seen = set()
+    for item in payload:
+        if not on_island(item):
+            continue
+        lat = float(item["lat"])
+        lng = float(item["lon"])
+        key = (round(lat, 5), round(lng, 5))
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append({
+            "label": _short_label(item),
+            "detail": item.get("display_name") or "",
+            "lat": lat,
+            "lng": lng,
+        })
+        if len(suggestions) >= 6:
+            break
+    _suggest_cache[cache_key] = suggestions
+    return {"query": query, "suggestions": suggestions}
+
+
+@app.post("/api/places/save")
+def places_save(body: PlacesSaveBody):
+    from places import place_cap
+
+    limit = place_cap(body.paid)
+    rows = list(body.places)
+    if body.replace and not body.paid:
+        rows = rows[-1:]
+    if len(rows) > limit:
+        raise HTTPException(status_code=400, detail="too_many_places")
+    return {
+        "ok": True,
+        "count": len(rows),
+        "limit": limit,
+        "paid": body.paid,
+        "alerts": bool(body.paid),
+        "replaced": bool(body.replace and not body.paid),
+    }
+
+
+@app.post("/api/places/status")
+def places_status(body: PlacesStatusBody):
+    from places import place_cap, place_status
+
+    lang = body.lang if body.lang in {"fr", "en"} else "fr"
+    lots = load_snow_store().get("rows") or []
+    sites = all_sites()
+    statuses = []
+    for raw in body.places[: place_cap(body.paid)]:
+        place = raw.model_dump()
+        if not place.get("kind"):
+            place["kind"] = place.get("type") or "home"
+        if place.get("lat") is None and (place.get("query") or ""):
+            found = geocode(place["query"])
+            if found:
+                place["lat"] = found["lat"]
+                place["lng"] = found["lng"]
+                place["label"] = place.get("label") or found.get("label") or place["query"]
+        statuses.append(place_status(place, sites, lots, lang))
+    return {"places": statuses, "limit": place_cap(body.paid), "alerts": bool(body.paid)}
+
+
+@app.get("/api/snow-lots")
+def snow_lots():
+    store = load_snow_store()
+    lots = []
+    for lot in store.get("rows") or []:
+        item = dict(lot)
+        lat, lng = map_point(item.get("lat"), item.get("lng"))
+        item["lat"] = lat
+        item["lng"] = lng
+        lots.append(item)
+    return {
+        "available": bool(store.get("available")),
+        "imported_at": store.get("imported_at"),
+        "source_page": store.get("source_page", SNOW_PAGE),
+        "license": store.get("license", "CC-BY-4.0"),
+        "count": store.get("count", 0),
+        "lots": lots,
     }
 
 

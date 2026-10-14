@@ -41,11 +41,13 @@ export function useRoute() {
   return route;
 }
 
-function Leaf() {
+function Cone() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
-      <path d="M2 21c0-3 1.85-5.36 5.08-6" />
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4.2 19.6h15.6v2.6H4.2z" fill="#c2410c" />
+      <path d="M12 2.6 19.4 19.8H4.6Z" fill="#ff8a3c" />
+      <path d="M9.7 8.4h4.6l.9 2.4H8.8Z" fill="#fff" />
+      <path d="M7.5 13.8h9l1.1 2.6H6.4Z" fill="#fff" />
     </svg>
   );
 }
@@ -109,7 +111,8 @@ export function Header({ lang, setLang }) {
   }, [menuOpen]);
 
   const items = [
-    { to: "/", key: "map", label: copy.navMap },
+    { to: "/", key: "places", label: copy.navPlaces },
+    { to: "/#map-panel", key: "map", label: copy.navMap, hash: true },
     { to: "/subscribe", key: "subscribe", label: copy.navSubscribe },
     { to: PARKS_URL, key: "parks", label: copy.navParks, external: true },
   ];
@@ -119,8 +122,21 @@ export function Header({ lang, setLang }) {
     return path === to || path.startsWith(`${to}/`);
   }
 
-  function go(event, to) {
+  function go(event, to, hash) {
     event.preventDefault();
+    if (hash || to.includes("#")) {
+      const [pathname, anchor] = to.split("#");
+      if (window.location.pathname !== (pathname || "/")) {
+        navigate(pathname || "/");
+      }
+      if (anchor) {
+        requestAnimationFrame(() => {
+          const node = document.getElementById(anchor);
+          if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+      return;
+    }
     navigate(to);
   }
 
@@ -137,7 +153,7 @@ export function Header({ lang, setLang }) {
     <header className="site-header" data-testid="app-header">
       <div className="site-header-bar">
         <a className="brand" href="/" onClick={(event) => go(event, "/")}>
-          <span className="brand-mark"><Leaf /></span>
+          <span className="brand-mark"><Cone /></span>
           <span className="brand-text">
             <span className="brand-title">Info-Route MTL</span>
             <span className="brand-sub">Montréal</span>
@@ -152,8 +168,8 @@ export function Header({ lang, setLang }) {
                 key={item.key}
                 href={item.to}
                 data-testid={`nav-${item.key}`}
-                className={active(item.to) ? "active" : ""}
-                onClick={(event) => go(event, item.to)}
+                className={active(item.to.split("#")[0]) ? "active" : ""}
+                onClick={(event) => go(event, item.to, item.hash)}
               >
                 {item.label}
               </a>
@@ -188,8 +204,8 @@ export function Header({ lang, setLang }) {
               <a
                 key={item.key}
                 href={item.to}
-                className={active(item.to) ? "active" : ""}
-                onClick={(event) => go(event, item.to)}
+                className={active(item.to.split("#")[0]) ? "active" : ""}
+                onClick={(event) => go(event, item.to, item.hash)}
               >
                 {item.label}
               </a>
@@ -210,7 +226,7 @@ export function Header({ lang, setLang }) {
   );
 }
 
-export function Footer({ lang, importedAt, avisImportedAt, mtqImportedAt, formatImport }) {
+export function Footer({ lang, importedAt, avisImportedAt, mtqImportedAt, snowImportedAt, formatImport }) {
   const copy = COPY[lang];
   return (
     <footer className="site-footer">
@@ -226,11 +242,16 @@ export function Footer({ lang, importedAt, avisImportedAt, mtqImportedAt, format
         <span className="footer-badge">Montréal · 2026</span>
       </div>
       <p className="footer-data">
+        {copy.signsNote}
+        {" · "}
         {formatImport(importedAt, lang, copy.importedWorks)}
         {avisImportedAt ? ` · ${formatImport(avisImportedAt, lang, copy.importedAvis)}` : ""}
         {mtqImportedAt ? ` · ${formatImport(mtqImportedAt, lang, copy.importedMtq)}` : ""}
+        {snowImportedAt ? ` · ${formatImport(snowImportedAt, lang, copy.importedSnow)}` : ""}
         {" · "}
         <a href="https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d">{copy.datasetWorks}</a>
+        {" · "}
+        <a href="https://donnees.montreal.ca/dataset/667342f7-f667-4c3c-9837-65e81312cd8d">{copy.datasetImpacts}</a>
         {" · "}
         <a href="https://donnees.montreal.ca/dataset/avis-alertes">{copy.datasetAvis}</a>
         {" · "}
@@ -239,6 +260,8 @@ export function Footer({ lang, importedAt, avisImportedAt, mtqImportedAt, format
         <a href="https://www.donneesquebec.ca/recherche/dataset/travaux-routiers">{copy.datasetMtq}</a>
         {" · "}
         <a href="https://www.quebec511.info">{copy.mtqHuman}</a>
+        {" · "}
+        <a href="https://donnees.montreal.ca/dataset/stationnements-deneigement">{copy.datasetSnow}</a>
         {" · "}
         <a href="https://creativecommons.org/licenses/by/4.0/">CC-BY 4.0</a>
         {" · "}

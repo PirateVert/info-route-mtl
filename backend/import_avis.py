@@ -37,6 +37,10 @@ BROWSER_UA = (
 KEEP_TYPES = ("Circulation et transport", "Stationnement")
 MHM = "Mercier-Hochelaga-Maisonneuve"
 OUT_PATH = Path(__file__).resolve().parent / "data" / "avis.json"
+# Island of Montreal, including Pointe-aux-Trembles. Dummy GeoJSON points at
+# 0,0 (Null Island, Gulf of Guinea) are stored as missing coordinates.
+LAT_MIN, LAT_MAX = 45.40, 45.72
+LNG_MIN, LNG_MAX = -73.99, -73.45
 
 # service_publieur is the city communications service, not the borough. Titles
 # usually name the borough; match those names onto the roadwork boroughid values.
@@ -103,6 +107,14 @@ def first_pair(coords):
     return first_pair(coords[0])
 
 
+def valid_island_point(lat: float | None, lng: float | None) -> bool:
+    if lat is None or lng is None:
+        return False
+    if lat == 0 and lng == 0:
+        return False
+    return LAT_MIN <= lat <= LAT_MAX and LNG_MIN <= lng <= LNG_MAX
+
+
 def representative_point(geometry: dict | None) -> tuple[float | None, float | None]:
     if not geometry:
         return None, None
@@ -163,6 +175,8 @@ def project_feature(feature: dict, index: int) -> dict | None:
         return None
     geometry = feature.get("geometry") or {}
     lat, lng = representative_point(geometry)
+    if not valid_island_point(lat, lng):
+        lat, lng = None, None
     titre = (props.get("titre") or "").strip()
     lien = (props.get("lien") or "").strip()
     return {

@@ -1,17 +1,14 @@
 import { useEffect, useState } from "react";
-import { COPY, MHM, reasonLabel } from "./i18n";
+import AddressSuggest from "./AddressSuggest";
+import PlaceKindBar from "./PlaceKindBar";
+import { COPY, reasonLabel } from "./i18n";
 import { BackToMap, navigate } from "./chrome";
+import { PAID_MAX, PLACE_KINDS, formatPlaceLabel, kindNeedsVia, storeManageToken } from "./places";
 
-const ALERT_KEYS = ["new", "ending", "dates", "status", "who", "reason"];
-const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"];
-const PLACE_TYPES = ["route", "street", "address", "intersection", "near_me"];
-const MAX_PLACES = 10;
+const MAX_PLACES = PAID_MAX;
 
 function placeLabel(place) {
-  if (place.type === "route") return `${place.query} → ${place.via}`;
-  if (place.type === "intersection") return `${place.query} × ${place.via}`;
-  if (place.type === "near_me") return place.via || place.query;
-  return place.query;
+  return formatPlaceLabel(place) || place.query || "";
 }
 
 async function sendJson(path, options = {}) {
@@ -32,14 +29,14 @@ function errorText(copy, error) {
   return copy.errors[error.code] || copy.errors.load;
 }
 
-export default function Subscribe({ lang }) {
+export default function Subscribe({ lang, savedPlaces = [] }) {
   const copy = COPY[lang].subscribe;
   const path = window.location.pathname;
   let screen;
   if (path.startsWith("/subscribe/success")) screen = <Success lang={lang} />;
   else if (path.startsWith("/subscribe/cancel")) screen = <Cancel lang={lang} />;
   else if (path.startsWith("/subscribe/manage")) screen = <Manage lang={lang} />;
-  else screen = <Signup lang={lang} copy={copy} />;
+  else screen = <Signup lang={lang} copy={copy} savedPlaces={savedPlaces} />;
   return (
     <>
       <BackToMap lang={lang} />
@@ -48,13 +45,18 @@ export default function Subscribe({ lang }) {
   );
 }
 
-function PlacesEditor({ copy, places, setPlaces, setError }) {
-  const [kind, setKind] = useState("route");
+function PlacesEditor({ copy, places, setPlaces, setError, lang }) {
+  const [kind, setKind] = useState("home");
   const [query, setQuery] = useState("");
   const [via, setVia] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [draftEnd, setDraftEnd] = useState(null);
   const [adding, setAdding] = useState(false);
-  const needsVia = kind === "route" || kind === "intersection";
-  const isNearMe = kind === "near_me";
+  const needsVia = kindNeedsVia(kind);
+  const labels = PLACE_KINDS.reduce((acc, item) => {
+    acc[item] = copy.placeType[item];
+    return acc;
+  }, {});
 
   async function savePlace(next) {
     if (places.length >= MAX_PLACES) {
@@ -72,6 +74,8 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
       setPlaces((current) => [...current, next]);
       setQuery("");
       setVia("");
+      setDraft(null);
+      setDraftEnd(null);
     } catch (err) {
       setError(errorText(copy, err));
     } finally {
@@ -81,38 +85,23 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
 
   async function addPlace(event) {
     event.preventDefault();
-    await savePlace({ type: kind, query: query.trim(), via: via.trim() });
-  }
-
-  function addNearMe() {
-    if (!navigator.geolocation) {
-      setError(copy.errors.geo_unsupported);
-      return;
-    }
-    if (places.length >= MAX_PLACES) {
-      setError(copy.errors.too_many_places);
-      return;
-    }
-    setAdding(true);
-    setError("");
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        await savePlace({
-          type: "near_me",
-          query: `${lat.toFixed(6)},${lng.toFixed(6)}`,
-          via: copy.placeHereLabel,
-        });
-      },
-      (err) => {
-        setAdding(false);
-        if (err.code === 1) setError(copy.errors.geo_denied);
-        else if (err.code === 3) setError(copy.errors.geo_timeout);
-        else setError(copy.errors.geo_unavailable);
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
-    );
+    if (!draft) return;
+    if (needsVia && !draftEnd) return;
+    await savePlace({
+      type: kind,
+      kind,
+      query: draft.label,
+      via: needsVia ? draftEnd.label : "",
+      label: kind === "route"
+        ? `${draft.label} → ${draftEnd.label}`
+        : kind === "intersection"
+          ? `${draft.label} × ${draftEnd.label}`
+          : draft.label,
+      lat: draft.lat,
+      lng: draft.lng,
+      end_lat: draftEnd?.lat,
+      end_lng: draftEnd?.lng,
+    });
   }
 
   return (
@@ -122,7 +111,7 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
       <ul className="place-list">
         {places.map((place, index) => (
           <li key={`${place.type}-${place.query}-${place.via}-${index}`}>
-            <span className="place-kind">{copy.placeType[place.type]}</span>
+            <span className="place-kind">{copy.placeType[place.type] || copy.placeType[place.kind]}</span>
             <span className="place-label">{placeLabel(place)}</span>
             <button
               type="button"
@@ -136,83 +125,71 @@ function PlacesEditor({ copy, places, setPlaces, setError }) {
       </ul>
       {places.length < MAX_PLACES && (
         <div className="place-form">
-          <label htmlFor="place-type">{copy.placeKind}</label>
-          <select id="place-type" value={kind} onChange={(event) => setKind(event.target.value)}>
-            {PLACE_TYPES.map((item) => (
-              <option key={item} value={item}>{copy.placeType[item]}</option>
-            ))}
-          </select>
-          {isNearMe ? (
-            <button type="button" className="text-button" disabled={adding} onClick={addNearMe}>
-              {adding ? copy.addingPlace : copy.useMyLocation}
-            </button>
-          ) : (
-            <>
-          <label htmlFor="place-query">{copy.placeQuery[kind]}</label>
-          <input
+          <PlaceKindBar
+            value={kind}
+            onChange={(next) => {
+              setKind(next);
+              setVia("");
+              setDraftEnd(null);
+            }}
+            labels={labels}
+            groupLabel={copy.placeKind}
+            idPrefix="sub-kind"
+          />
+          <AddressSuggest
             id="place-query"
+            lang={lang}
+            label={copy.placeQuery[kind]}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
             placeholder={copy.placePlaceholder[kind]}
+            onChange={setQuery}
+            onPick={(item) => {
+              setQuery(item.label);
+              setDraft(item);
+            }}
           />
           {needsVia && (
-            <>
-              <label htmlFor="place-via">{copy.placeVia[kind]}</label>
-              <input
-                id="place-via"
-                value={via}
-                onChange={(event) => setVia(event.target.value)}
-                placeholder={copy.placeViaPlaceholder[kind]}
-              />
-            </>
+            <AddressSuggest
+              id="place-via"
+              lang={lang}
+              label={copy.placeVia[kind]}
+              value={via}
+              placeholder={copy.placeViaPlaceholder[kind]}
+              onChange={setVia}
+              onPick={(item) => {
+                setVia(item.label);
+                setDraftEnd(item);
+              }}
+            />
           )}
-          <button type="button" className="text-button" disabled={adding || !query.trim() || (needsVia && !via.trim())} onClick={addPlace}>
+          <button type="button" className="text-button" disabled={adding || !draft || (needsVia && !draftEnd)} onClick={addPlace}>
             {adding ? copy.addingPlace : copy.addPlace}
           </button>
-            </>
-          )}
         </div>
       )}
     </div>
   );
 }
 
-function Signup({ lang, copy }) {
+function Signup({ lang, copy, savedPlaces = [] }) {
   const [email, setEmail] = useState("");
-  const [frequency, setFrequency] = useState("weekly");
   const [language, setLanguage] = useState(lang);
-  const [alerts, setAlerts] = useState(ALERT_KEYS);
-  const [borough, setBorough] = useState(MHM);
-  const [boroughs, setBoroughs] = useState([]);
-  const [places, setPlaces] = useState([]);
+  const [places, setPlaces] = useState(savedPlaces.slice(0, MAX_PLACES));
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((response) => response.json())
-      .then((data) => setBoroughs((data.boroughs || []).map((item) => item.name)))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
     const timer = setTimeout(() => {
       sendJson("/api/subscribe/preview", {
         method: "POST",
-        body: JSON.stringify({ borough, alerts, places }),
+        body: JSON.stringify({ borough: "", alerts: ["closure", "parking"], places }),
       })
         .then(setPreview)
         .catch(() => setPreview(null));
     }, 350);
     return () => clearTimeout(timer);
-  }, [borough, alerts, places]);
-
-  function toggleAlert(key) {
-    setAlerts((current) => (
-      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
-    ));
-  }
+  }, [places]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -223,10 +200,10 @@ function Signup({ lang, copy }) {
         method: "POST",
         body: JSON.stringify({
           email,
-          alerts,
-          frequency,
+          alerts: ["closure", "parking"],
+          frequency: "weekly",
           language,
-          borough,
+          borough: "",
           places,
           origin_url: window.location.origin,
         }),
@@ -238,8 +215,6 @@ function Signup({ lang, copy }) {
     }
   }
 
-  const names = Array.from(new Set([MHM, ...boroughs])).sort((a, b) => a.localeCompare(b, "fr"));
-
   return (
     <section className="subscribe">
       <h1>{copy.title}</h1>
@@ -247,13 +222,9 @@ function Signup({ lang, copy }) {
       <div className="subscribe-grid">
         <form className="detail subscribe-card" onSubmit={onSubmit}>
           <p className="price"><strong>$2</strong> <span>CAD / {copy.month}</span></p>
+          <p className="hint">{copy.included}</p>
           <label htmlFor="sub-email">{copy.email}</label>
           <input id="sub-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="vous@example.com" />
-
-          <label htmlFor="sub-frequency">{copy.frequency}</label>
-          <select id="sub-frequency" value={frequency} onChange={(event) => setFrequency(event.target.value)}>
-            {FREQUENCIES.map((key) => <option key={key} value={key}>{copy.freq[key]}</option>)}
-          </select>
 
           <label htmlFor="sub-language">{copy.digestLanguage}</label>
           <select id="sub-language" value={language} onChange={(event) => setLanguage(event.target.value)}>
@@ -262,30 +233,13 @@ function Signup({ lang, copy }) {
             <option value="both">{copy.bothLanguages}</option>
           </select>
 
-          <button type="submit" disabled={busy || alerts.length === 0}>{busy ? copy.sending : copy.cta}</button>
+          <button type="submit" disabled={busy}>{busy ? copy.sending : copy.cta}</button>
           {error && <p className="banner">{error}</p>}
           <p className="hint">{copy.secure}</p>
         </form>
 
         <div className="detail">
-          <h2>{copy.choose}</h2>
-          <fieldset>
-            <legend>{copy.alerts}</legend>
-            {ALERT_KEYS.map((key) => (
-              <label key={key} className="check">
-                <input type="checkbox" checked={alerts.includes(key)} onChange={() => toggleAlert(key)} />
-                <span>{copy.alert[key]}</span>
-              </label>
-            ))}
-          </fieldset>
-
-          <label htmlFor="sub-borough">{copy.borough}</label>
-          <select id="sub-borough" value={borough} onChange={(event) => setBorough(event.target.value)}>
-            <option value="">{copy.allBoroughs}</option>
-            {names.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-
-          <PlacesEditor copy={copy} places={places} setPlaces={setPlaces} setError={setError} />
+          <PlacesEditor copy={copy} places={places} setPlaces={setPlaces} setError={setError} lang={lang} />
 
           {preview && (
             <p className="hint">
@@ -318,7 +272,10 @@ function Success({ lang }) {
       return;
     }
     sendJson(`/api/subscribe/session?session_id=${encodeURIComponent(sessionId)}`)
-      .then(setInfo)
+      .then((data) => {
+        if (data.manage_token) storeManageToken(data.manage_token);
+        setInfo(data);
+      })
       .catch((err) => setError(errorText(copy, err)));
   }, [sessionId, copy]);
 
@@ -382,8 +339,8 @@ function Manage({ lang }) {
       .then((data) => {
         setChanges(data.changes || []);
         setForm({
-          alerts: data.alerts || [],
-          frequency: data.frequency,
+          alerts: ["closure", "parking"],
+          frequency: "weekly",
           language: data.language,
           borough: data.borough || "",
           places: data.places || (data.street ? [{ type: "street", query: data.street, via: "" }] : []),
@@ -393,15 +350,6 @@ function Manage({ lang }) {
       .catch((err) => setError(errorText(copy, err)));
   }, [token, copy]);
 
-  function toggleAlert(key) {
-    setForm((current) => ({
-      ...current,
-      alerts: current.alerts.includes(key)
-        ? current.alerts.filter((item) => item !== key)
-        : [...current.alerts, key],
-    }));
-  }
-
   async function onSubmit(event) {
     event.preventDefault();
     setBusy(true);
@@ -410,7 +358,7 @@ function Manage({ lang }) {
     try {
       const data = await sendJson("/api/subscribe", {
         method: "PATCH",
-        body: JSON.stringify({ token, ...form }),
+        body: JSON.stringify({ token, ...form, alerts: ["closure", "parking"], frequency: "weekly" }),
       });
       setChanges(data.changes || []);
       setSaved(true);
@@ -434,20 +382,8 @@ function Manage({ lang }) {
     <section className="subscribe">
       <h1>{copy.manageTitle}</h1>
       <p className="tagline">{form.email}</p>
+      <p className="hint">{copy.included}</p>
       <form className="detail" onSubmit={onSubmit}>
-        <fieldset>
-          <legend>{copy.alerts}</legend>
-          {ALERT_KEYS.map((key) => (
-            <label key={key} className="check">
-              <input type="checkbox" checked={form.alerts.includes(key)} onChange={() => toggleAlert(key)} />
-              <span>{copy.alert[key]}</span>
-            </label>
-          ))}
-        </fieldset>
-        <label htmlFor="manage-frequency">{copy.frequency}</label>
-        <select id="manage-frequency" value={form.frequency} onChange={(event) => setForm({ ...form, frequency: event.target.value })}>
-          {FREQUENCIES.map((key) => <option key={key} value={key}>{copy.freq[key]}</option>)}
-        </select>
         <label htmlFor="manage-language">{copy.digestLanguage}</label>
         <select id="manage-language" value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })}>
           <option value="fr">Français</option>
@@ -456,6 +392,7 @@ function Manage({ lang }) {
         </select>
         <PlacesEditor
           copy={copy}
+          lang={lang}
           places={form.places}
           setPlaces={(next) => setForm((current) => ({
             ...current,
@@ -472,7 +409,7 @@ function Manage({ lang }) {
         <ul className="preview-list">
           {changes.map((item) => (
             <li key={item.id}>
-              {item.street} · {item.kinds.map((kind) => copy.alert[kind]).join(", ")}
+              {item.street} · {item.kinds.map((kind) => copy.alert[kind] || kind).join(", ")}
             </li>
           ))}
         </ul>

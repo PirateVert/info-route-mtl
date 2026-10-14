@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import WorkMap from "./WorkMap";
+import AddressSuggest from "./AddressSuggest";
+import WorkMap, { isMapPoint } from "./WorkMap";
 import Subscribe from "./Subscribe";
-import { Footer, Header, useRoute } from "./chrome";
+import { Footer, Header, navigate, useRoute } from "./chrome";
 import {
   COPY,
-  MHM,
   avisTypeLabel,
   dateRangeText,
   formatDistance,
   formatImport,
   geoErrorKey,
+  impactKinds,
+  impactLabel,
   mtqDescription,
   readLang,
   reasonLabel,
@@ -17,12 +19,23 @@ import {
   storeLang,
   whoText,
 } from "./i18n";
+import PlaceKindBar from "./PlaceKindBar";
+import {
+  FREE_MAX,
+  PAID_MAX,
+  capPlaces,
+  formatPlaceLabel,
+  kindNeedsVia,
+  newPlaceId,
+  readManageToken,
+  readPlaces,
+  storeManageToken,
+  storePlaces,
+} from "./places";
 
-const PLACE_TYPES = ["route", "street", "address", "intersection", "near_me"];
-
-async function getJson(path) {
+async function getJson(path, options) {
   const base = process.env.REACT_APP_BACKEND_URL || "";
-  const response = await fetch(`${base}${path}`);
+  const response = await fetch(`${base}${path}`, options);
   if (!response.ok) {
     let detail = "";
     try {
@@ -43,6 +56,7 @@ function errorMessage(copy, error) {
   if (!error) return copy.loadError;
   if (error.detail === "outside_montreal" || error.detail === "bad_coords") return copy.geoOutside;
   if (error.detail === "place_not_found") return copy.placeNotFound;
+  if (error.detail === "too_many_places") return copy.placeUpgrade;
   if (copy[error]) return copy[error];
   return copy.loadError;
 }
@@ -50,31 +64,57 @@ function errorMessage(copy, error) {
 function SiteList({ items, selectedId, onSelect, copy, lang, search = false }) {
   return (
     <ul className="site-list">
-      {items.map((work) => {
-        const avis = work.kind === "avis";
-        const mtq = work.kind === "mtq";
-        return (
-          <li key={work.id}>
-            <button
-              type="button"
-              className={`${work.id === selectedId ? "active" : ""} ${avis ? "avis-item" : ""} ${mtq ? "mtq-item" : ""}`.trim()}
-              onClick={() => onSelect(work)}
-            >
-              <span className="street">{work.title || work.street || copy.unknown}</span>
-              <span className="meta">
-                {avis ? `${copy.kindAvis} · ` : mtq ? `${copy.kindMtq} · ` : ""}
-                {work.borough || (mtq ? copy.kindMtq : "")}
-                {search && work.match
-                  ? ` · ${work.match === "street" ? copy.streetMatch : copy.nearbyMatch}`
-                  : ""}
-                {search && formatDistance(work.distance_m, lang)
-                  ? ` · ${formatDistance(work.distance_m, lang)}`
-                  : ""}
+      {items.map((work) => (
+        <li key={work.id}>
+          <button
+            type="button"
+            className={`${work.id === selectedId ? "active" : ""} impact-${work.map_primary || "none"}`.trim()}
+            onClick={() => onSelect(work)}
+          >
+            <span className="street">{work.title || work.street || copy.unknown}</span>
+            <span className="meta">
+              {impactLabel(work.resident_primary || work.map_primary || "none", lang)}
+              {work.borough ? ` · ${work.borough}` : ""}
+              {search && work.match
+                ? ` · ${work.match === "street" ? copy.streetMatch : copy.nearbyMatch}`
+                : ""}
+              {search && formatDistance(work.distance_m, lang)
+                ? ` · ${formatDistance(work.distance_m, lang)}`
+                : ""}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PlaceCards({ statuses, copy, lang, onOpen }) {
+  if (!statuses.length) {
+    return <p className="hint">{copy.placesEmpty}</p>;
+  }
+  return (
+    <ul className="place-cards">
+      {statuses.map((place) => (
+        <li key={place.id || place.label}>
+          <button
+            type="button"
+            className={`place-card ${place.status || "none"}`}
+            onClick={() => onOpen(place)}
+          >
+            <span className="place-card-kind">{copy.placeKinds[place.kind] || place.kind}</span>
+            <strong>{lang === "en" ? place.headline_en || place.headline : place.headline_fr || place.headline}</strong>
+            {place.snow?.enabled && <span className="place-card-snow">{copy.snowSoon}</span>}
+            {place.snow_lots?.[0] && (
+              <span className="place-card-snow">
+                {copy.snowLotsTitle}
+                {": "}
+                {lang === "en" ? place.snow_lots[0].name_en : place.snow_lots[0].name_fr}
               </span>
-            </button>
-          </li>
-        );
-      })}
+            )}
+          </button>
+        </li>
+      ))}
     </ul>
   );
 }
@@ -84,31 +124,58 @@ export default function App() {
   const copy = COPY[lang];
   const route = useRoute();
   const path = route.split("?")[0];
-  const [borough, setBorough] = useState(MHM);
+  const [borough, setBorough] = useState("");
   const [boroughs, setBoroughs] = useState([]);
   const [importedAt, setImportedAt] = useState("");
   const [avisImportedAt, setAvisImportedAt] = useState("");
   const [mtqImportedAt, setMtqImportedAt] = useState("");
+  const [snowImportedAt, setSnowImportedAt] = useState("");
+  const [snowAvailable, setSnowAvailable] = useState(false);
+  const [snowEnabled, setSnowEnabled] = useState(false);
   const [works, setWorks] = useState([]);
   const [avis, setAvis] = useState([]);
   const [mtq, setMtq] = useState([]);
+  const [snowLots, setSnowLots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [kind, setKind] = useState("street");
   const [query, setQuery] = useState("");
-  const [via, setVia] = useState("");
+  const [pin, setPin] = useState(null);
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [search, setSearch] = useState(null);
   const [selectedId, setSelectedId] = useState("");
-  const needsVia = kind === "route" || kind === "intersection";
-  const isNearMe = kind === "near_me";
-  const placeCopy = copy.subscribe;
+  const [showAll, setShowAll] = useState(false);
+  const [places, setPlaces] = useState(readPlaces);
+  const [placeStatuses, setPlaceStatuses] = useState([]);
+  const [placeKind, setPlaceKind] = useState("home");
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [placeVia, setPlaceVia] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [draftEnd, setDraftEnd] = useState(null);
+  const [pendingReplace, setPendingReplace] = useState(null);
+  const paid = Boolean(readManageToken());
+  const needsVia = kindNeedsVia(placeKind);
 
   useEffect(() => {
     document.documentElement.lang = lang === "en" ? "en" : "fr";
     document.title = "Info-Route MTL";
   }, [lang]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token") || "";
+    if (path.startsWith("/subscribe/success") || path.startsWith("/subscribe/manage")) {
+      const stored = params.get("session_id");
+      if (token) storeManageToken(token);
+      if (stored) {
+        getJson(`/api/subscribe/session?session_id=${encodeURIComponent(stored)}`)
+          .then((data) => {
+            if (data.manage_token) storeManageToken(data.manage_token);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [path]);
 
   useEffect(() => {
     let cancel = false;
@@ -119,6 +186,9 @@ export default function App() {
         setImportedAt(data.imported_at || "");
         setAvisImportedAt(data.avis?.imported_at || "");
         setMtqImportedAt(data.mtq?.imported_at || "");
+        setSnowImportedAt(data.snow?.imported_at || "");
+        setSnowAvailable(Boolean(data.snow?.lots_available));
+        setSnowEnabled(Boolean(data.snow?.status_enabled));
       })
       .catch(() => {
         if (!cancel) setError("loadError");
@@ -139,12 +209,15 @@ export default function App() {
       getJson(worksPath),
       getJson(avisPath).catch(() => ({ avis: [] })),
       getJson(mtqPath).catch(() => ({ mtq: [] })),
+      getJson("/api/snow-lots").catch(() => ({ lots: [], available: false })),
     ])
-      .then(([workData, avisData, mtqData]) => {
+      .then(([workData, avisData, mtqData, snowData]) => {
         if (cancel) return;
         setWorks(workData.works || []);
         setAvis(avisData.avis || []);
         setMtq(mtqData.mtq || []);
+        setSnowLots(snowData.available ? snowData.lots || [] : []);
+        setSnowAvailable(Boolean(snowData.available));
         setLoading(false);
       })
       .catch(() => {
@@ -156,6 +229,36 @@ export default function App() {
       cancel = true;
     };
   }, [borough]);
+
+  useEffect(() => {
+    setPlaces((current) => {
+      const next = capPlaces(current, paid);
+      return next.length === current.length ? current : next;
+    });
+  }, [paid]);
+
+  useEffect(() => {
+    storePlaces(places);
+    if (!places.length) {
+      setPlaceStatuses([]);
+      return undefined;
+    }
+    let cancel = false;
+    getJson("/api/places/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ places: capPlaces(places, paid), lang, paid }),
+    })
+      .then((data) => {
+        if (!cancel) setPlaceStatuses(data.places || []);
+      })
+      .catch(() => {
+        if (!cancel) setPlaceStatuses([]);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [places, lang, paid]);
 
   function changeLang(next) {
     setLang(next);
@@ -170,31 +273,64 @@ export default function App() {
     }
   }
 
-  async function runCoordSearch(lat, lng) {
-    const data = await getJson(`/api/search?type=near_me&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
-    setSearch(data);
-    setSelectedId("");
-  }
-
-  async function onSearch(event) {
-    event.preventDefault();
-    const text = query.trim();
-    const viaText = via.trim();
-    if (isNearMe || !text) return;
-    if (needsVia && !viaText) return;
+  async function runTypedSearch(kind, start, end) {
+    const label = end
+      ? (kind === "intersection" ? `${start.label} × ${end.label}` : `${start.label} → ${end.label}`)
+      : (start.label || placeQuery);
+    if (start?.lat != null) setPin({ ...start, label });
+    setQuery(label);
     setSearching(true);
     setError("");
     try {
-      const params = new URLSearchParams({ q: text, type: kind });
-      if (viaText) params.set("via", viaText);
+      const params = new URLSearchParams({ type: kind, q: start.label || placeQuery || label });
+      if (end?.label || placeVia) params.set("via", end?.label || placeVia);
+      if (start?.lat != null && start?.lng != null) {
+        params.set("lat", String(start.lat));
+        params.set("lng", String(start.lng));
+      }
       const data = await getJson(`/api/search?${params.toString()}`);
       setSearch(data);
       setSelectedId("");
     } catch (err) {
-      setError(err.detail === "place_not_found" ? "placeNotFound" : err.detail === "outside_montreal" || err.detail === "bad_coords" ? "geoOutside" : "loadError");
+      if (err.detail === "outside_montreal" || err.detail === "bad_coords") setError("geoOutside");
+      else if (err.detail === "place_not_found") setError("placeNotFound");
+      else setError("loadError");
+      setSearch({
+        place: { label, lat: start?.lat, lng: start?.lng, source: kind },
+        results: [],
+      });
     } finally {
       setSearching(false);
     }
+    const map = document.getElementById("map-panel");
+    if (map) map.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function zoomTo(place, kind = "near_me") {
+    if (kind !== "near_me" && kind !== "car") {
+      await runTypedSearch(kind, place, null);
+      return;
+    }
+    setPin(place);
+    setQuery(place.label || "");
+    setSearching(true);
+    setError("");
+    try {
+      const data = await getJson(
+        `/api/search?type=near_me&lat=${encodeURIComponent(place.lat)}&lng=${encodeURIComponent(place.lng)}&q=${encodeURIComponent(place.label || "")}`
+      );
+      setSearch(data);
+      setSelectedId("");
+    } catch (err) {
+      setSearch({
+        place: { label: place.label, lat: place.lat, lng: place.lng, source: "address" },
+        results: [],
+      });
+    } finally {
+      setSearching(false);
+    }
+    const map = document.getElementById("map-panel");
+    if (map) map.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function useMyLocation() {
@@ -208,7 +344,17 @@ export default function App() {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          await runCoordSearch(position.coords.latitude, position.coords.longitude);
+          const here = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            label: copy.youAreHere,
+          };
+          setPlaceKind("car");
+          setPlaceQuery(copy.youAreHere);
+          setDraft(here);
+          setDraftEnd(null);
+          setPlaceVia("");
+          await zoomTo(here, "car");
         } catch (err) {
           setError(err.detail === "outside_montreal" || err.detail === "bad_coords" ? "geoOutside" : "loadError");
         } finally {
@@ -228,13 +374,78 @@ export default function App() {
   function clearSearch() {
     setSearch(null);
     setQuery("");
-    setVia("");
+    setPin(null);
     setSelectedId("");
   }
 
-  function changeKind(next) {
-    setKind(next);
-    if (next !== "route" && next !== "intersection") setVia("");
+  function buildPlace(from = draft, until = draftEnd, kind = placeKind) {
+    if (!from) return null;
+    if (kindNeedsVia(kind) && !until) return null;
+    const via = kindNeedsVia(kind) ? (until?.label || "") : "";
+    let label = from.label;
+    if (kind === "route" && until) label = `${from.label} → ${until.label}`;
+    if (kind === "intersection" && until) label = `${from.label} × ${until.label}`;
+    return {
+      id: newPlaceId(),
+      kind,
+      type: kind,
+      query: from.label,
+      via,
+      label,
+      lat: from.lat,
+      lng: from.lng,
+      end_lat: until?.lat,
+      end_lng: until?.lng,
+    };
+  }
+
+  function resetDraft() {
+    setPlaceQuery("");
+    setPlaceVia("");
+    setDraft(null);
+    setDraftEnd(null);
+    setPendingReplace(null);
+  }
+
+  async function commitPlaces(nextList, { replace = false } = {}) {
+    try {
+      await getJson("/api/places/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ places: nextList, paid, replace }),
+      });
+    } catch (err) {
+      if (err.detail === "too_many_places") {
+        setError(paid ? "placeLimitPaidFull" : "placeUpgrade");
+        return false;
+      }
+    }
+    setPlaces(nextList);
+    resetDraft();
+    return true;
+  }
+
+  async function savePlace({ replace = false } = {}) {
+    const next = pendingReplace || buildPlace();
+    if (!next) return;
+    if (paid) {
+      if (places.length >= PAID_MAX) {
+        setError("placeLimitPaidFull");
+        return;
+      }
+      await commitPlaces([...places, next]);
+      return;
+    }
+    if (places.length >= FREE_MAX && !replace) {
+      setPendingReplace(next);
+      setError("placeUpgrade");
+      return;
+    }
+    await commitPlaces([next], { replace: true });
+  }
+
+  function removePlace(id) {
+    setPlaces((current) => current.filter((place) => place.id !== id));
   }
 
   const layered = useMemo(
@@ -245,7 +456,11 @@ export default function App() {
     ],
     [works, avis, mtq]
   );
-  const shown = search ? search.results || [] : layered;
+  const shown = useMemo(() => {
+    const rows = search ? search.results || [] : layered;
+    if (showAll) return rows;
+    return rows.filter((item) => item.closes);
+  }, [search, layered, showAll]);
   const workCount = shown.filter((item) => item.kind !== "avis" && item.kind !== "mtq").length;
   const avisCount = shown.filter((item) => item.kind === "avis").length;
   const mtqCount = shown.filter((item) => item.kind === "mtq").length;
@@ -258,96 +473,177 @@ export default function App() {
     return { lat: search.place.lat, lng: search.place.lng, label: copy.youAreHere };
   }, [search, copy.youAreHere]);
   const focusPoints = useMemo(() => {
-    if (!search?.place) return [];
     const points = [];
-    if (Number.isFinite(search.place.lat) && Number.isFinite(search.place.lng)) {
+    if (pin) points.push(pin);
+    if (search?.place && isMapPoint(search.place.lat, search.place.lng)) {
       points.push({ lat: search.place.lat, lng: search.place.lng });
     }
-    if (Number.isFinite(search.place.end_lat) && Number.isFinite(search.place.end_lng)) {
-      points.push({ lat: search.place.end_lat, lng: search.place.end_lng });
-    }
     return points;
-  }, [search]);
-  const fitToken = search
-    ? `search:${search.type || ""}:${search.query}:${search.via || ""}:${search.place?.lat || ""}:${search.place?.lng || ""}:${search.place?.end_lat || ""}:${search.place?.source || ""}`
-    : `borough:${borough}:w${works.length}:a${avis.length}:m${mtq.length}`;
+  }, [search, pin]);
+  const fitToken = pin
+    ? `pin:${pin.lat}:${pin.lng}`
+    : search
+      ? `search:${search.type || ""}:${search.query}:${search.place?.lat || ""}:${search.place?.lng || ""}`
+      : `borough:${borough}:w${works.length}:a${avis.length}:m${mtq.length}:all${showAll}`;
 
   const boroughOptions = useMemo(() => {
     const names = new Set(boroughs);
-    names.add(MHM);
     return Array.from(names).sort((a, b) => a.localeCompare(b, "fr"));
   }, [boroughs]);
+
+  const nearbySnow = useMemo(() => {
+    if (!snowAvailable || !pin) return snowLots.slice(0, 40);
+    return snowLots;
+  }, [snowAvailable, snowLots, pin]);
 
   return (
     <>
     <Header lang={lang} setLang={changeLang} />
     <main className="page">
       {path.startsWith("/subscribe") ? (
-        <Subscribe lang={lang} />
+        <Subscribe lang={lang} savedPlaces={places} />
       ) : (
       <>
       <h1 className="page-title">{copy.title}</h1>
       <p className="tagline">{copy.tagline}</p>
       <p className="disclaimer">{copy.disclaimer}</p>
 
-      <form className="search" onSubmit={onSearch}>
-        <p className="search-lead">{copy.searchLabel}</p>
-        <label htmlFor="map-search-type">{copy.searchKind}</label>
-        <select
-          id="map-search-type"
-          value={kind}
-          onChange={(event) => changeKind(event.target.value)}
-        >
-          {PLACE_TYPES.map((item) => (
-            <option key={item} value={item}>{placeCopy.placeType[item]}</option>
-          ))}
-        </select>
-        <p className="hint">{copy.searchHelp}</p>
-        {isNearMe ? (
+      <section className="home-places" id="places">
+        <div className="places-head">
+          <h2>{copy.placesTitle}</h2>
+          <p className="hint">{paid ? copy.placeLimitPaid : copy.placeLimitFree}</p>
+        </div>
+        <PlaceCards
+          statuses={placeStatuses}
+          copy={copy}
+          lang={lang}
+          onOpen={(place) => {
+            if (isMapPoint(place.sites?.[0]?.lat, place.sites?.[0]?.lng)) {
+              selectWork(place.sites[0]);
+            }
+            const match = places.find((item) => item.id === place.id);
+            if (match?.lat) zoomTo({ lat: match.lat, lng: match.lng, label: match.label });
+          }}
+        />
+        {placeStatuses.some((item) => item.snow_lots?.length) && (
+          <div className="snow-lots">
+            <h3>{copy.snowLotsTitle}</h3>
+            <ul>
+              {placeStatuses.flatMap((item) => item.snow_lots || []).slice(0, 6).map((lot) => (
+                <li key={lot.id}>{lang === "en" ? lot.name_en : lot.name_fr} · {lang === "en" ? lot.hours_en : lot.hours_fr}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {snowEnabled && <p className="hint">{copy.snowSoon}</p>}
+        {places.map((place) => (
+          <p key={`rm-${place.id}`} className="place-remove-row">
+            <span>{formatPlaceLabel(place)}</span>
+            <button type="button" className="text-button" onClick={() => removePlace(place.id)}>{copy.subscribe.removePlace}</button>
+          </p>
+        ))}
+        {!paid && (
+          <p className="hint">
+            {copy.placeUpgrade}{" "}
+            <a href="/subscribe" onClick={(event) => { event.preventDefault(); navigate("/subscribe"); }}>{copy.paidCta}</a>
+          </p>
+        )}
+      </section>
+
+      <form
+        className="search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (draft && (!needsVia || draftEnd)) {
+            runTypedSearch(placeKind, draft, draftEnd);
+          } else if (placeQuery.trim()) {
+            runTypedSearch(placeKind, { label: placeQuery.trim(), lat: draft?.lat, lng: draft?.lng }, draftEnd || (placeVia ? { label: placeVia } : null));
+          }
+        }}
+      >
+        <PlaceKindBar
+          value={placeKind}
+          onChange={(kind) => {
+            setPlaceKind(kind);
+            setDraftEnd(null);
+            setPlaceVia("");
+            setPendingReplace(null);
+          }}
+          labels={copy.placeKinds}
+          groupLabel={copy.searchLabel}
+          idPrefix="search-kind"
+        />
+        <p className="hint">{paid ? copy.searchHelpPaid : copy.searchHelp}</p>
+        <AddressSuggest
+          id="map-search-query"
+          lang={lang}
+          label={copy.subscribe.placeQuery[placeKind] || copy.placeKind}
+          value={placeQuery}
+          placeholder={copy.subscribe.placePlaceholder[placeKind] || copy.searchPlaceholder}
+          onChange={(value) => {
+            setPlaceQuery(value);
+            setDraft(null);
+          }}
+          onPick={(item) => {
+            setPlaceQuery(item.label);
+            setDraft(item);
+            if (!needsVia) runTypedSearch(placeKind, item, null);
+          }}
+        />
+        {needsVia && (
+          <AddressSuggest
+            id="map-search-via"
+            lang={lang}
+            label={copy.subscribe.placeVia[placeKind] || copy.routeEnd}
+            value={placeVia}
+            placeholder={copy.subscribe.placeViaPlaceholder[placeKind] || copy.subscribe.placeViaPlaceholder.route}
+            onChange={(value) => {
+              setPlaceVia(value);
+              setDraftEnd(null);
+            }}
+            onPick={(item) => {
+              setPlaceVia(item.label);
+              setDraftEnd(item);
+              if (draft) runTypedSearch(placeKind, draft, item);
+            }}
+          />
+        )}
+        <div className="search-row">
+          <button type="submit" className="search-go" disabled={searching || (!placeQuery.trim() && !draft)}>
+            {searching ? copy.searching : copy.searchButton}
+          </button>
           <button
             type="button"
-            className="locate-button"
-            disabled={searching}
-            onClick={useMyLocation}
+            className="search-go"
+            disabled={!draft || (needsVia && !draftEnd)}
+            onClick={() => savePlace()}
           >
+            {copy.addPlace}
+          </button>
+          <button type="button" className="locate-button" disabled={searching} onClick={useMyLocation}>
             {locating ? copy.locating : copy.useMyLocation}
           </button>
-        ) : (
-          <div className="search-fields">
-            <label htmlFor="map-search-query">{placeCopy.placeQuery[kind]}</label>
-            <input
-              id="map-search-query"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={placeCopy.placePlaceholder[kind]}
-              autoComplete="off"
-            />
-            {needsVia && (
-              <>
-                <label htmlFor="map-search-via">{placeCopy.placeVia[kind]}</label>
-                <input
-                  id="map-search-via"
-                  value={via}
-                  onChange={(event) => setVia(event.target.value)}
-                  placeholder={placeCopy.placeViaPlaceholder[kind]}
-                  autoComplete="off"
-                />
-              </>
-            )}
+        </div>
+        {pendingReplace && !paid && (
+          <div className="replace-place">
+            <p className="hint">{copy.replaceAsk(formatPlaceLabel(places[0]) || pendingReplace.label)}</p>
             <div className="search-row">
-              <button
-                type="submit"
-                className="search-go"
-                disabled={searching || !query.trim() || (needsVia && !via.trim())}
-              >
-                {searching && !locating ? copy.searching : copy.searchButton}
+              <button type="button" className="search-go" onClick={() => savePlace({ replace: true })}>
+                {copy.replacePlace}
               </button>
+              <a
+                className="text-button inline-link"
+                href="/subscribe"
+                onClick={(event) => { event.preventDefault(); navigate("/subscribe"); }}
+              >
+                {copy.keepAndUpgrade}
+              </a>
             </div>
           </div>
         )}
       </form>
 
-      <div className="filters">
+      <div className="filters" id="map-panel">
         <label htmlFor="borough">{copy.boroughLabel}</label>
         <select
           id="borough"
@@ -365,6 +661,10 @@ export default function App() {
             </option>
           ))}
         </select>
+        <label className="check show-all">
+          <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
+          <span>{copy.showAll}</span>
+        </label>
         <p className="count">{loading ? copy.loading : copy.layerCount({ works: workCount, avis: avisCount, mtq: mtqCount })}</p>
         {search && (
           <button type="button" className="text-button" onClick={clearSearch}>
@@ -373,40 +673,64 @@ export default function App() {
         )}
       </div>
 
-      {error && <p className="banner">{errorMessage(copy, error)}</p>}
+      {error && (
+        <p className="banner">
+          {error === "placeUpgrade" ? copy.placeUpgrade : error === "placeLimitPaidFull" ? copy.placeLimitPaidFull : errorMessage(copy, error)}
+          {error === "placeUpgrade" && (
+            <>
+              {" "}
+              <a href="/subscribe" onClick={(event) => { event.preventDefault(); navigate("/subscribe"); }}>{copy.paidCta}</a>
+            </>
+          )}
+        </p>
+      )}
 
       <div className="layout">
-        <div className="map-wrap">
-          <WorkMap
-            works={shown}
-            selectedId={selectedId}
-            onSelect={selectWork}
-            fitToken={fitToken}
-            here={here}
-            focusPoints={focusPoints}
-          />
-          <p className="legend">
-            <span><i className="swatch work" /> {copy.legendWork}</span>
-            <span><i className="swatch avis" /> {copy.legendAvis}</span>
-            <span><i className="swatch mtq" /> {copy.legendMtq}</span>
-          </p>
+        <div className="map-panel">
+          <div className="map-wrap">
+            <WorkMap
+              works={shown}
+              selectedId={selectedId}
+              onSelect={selectWork}
+              fitToken={fitToken}
+              here={here}
+              focusPoints={focusPoints}
+              pin={pin}
+              snowLots={snowAvailable ? nearbySnow : []}
+            />
+          </div>
+          <div className="legend">
+            <p className="legend-title">{copy.legendTitle}</p>
+            <p className="legend-items">
+              <span><i className="swatch street" aria-hidden="true" /> {copy.legendStreet}</span>
+              <span><i className="swatch lane" aria-hidden="true" /> {copy.legendLane}</span>
+              <span><i className="swatch sidewalk" aria-hidden="true" /> {copy.legendSidewalk}</span>
+              <span><i className="swatch parking" aria-hidden="true" /> {copy.legendParking}</span>
+              {showAll && <span><i className="swatch none" aria-hidden="true" /> {copy.legendNone}</span>}
+              {snowAvailable && <span><i className="swatch snow" aria-hidden="true" /> {copy.legendSnow}</span>}
+            </p>
+          </div>
         </div>
 
         <section className="side">
           {here && <p className="place here-hint">{copy.youAreHere}</p>}
-          {search?.place && !here && (
+          {pin && !here && (
             <p className="place">
-              {copy.placeFound}{lang === "fr" ? " : " : ": "}{search.place.label}
+              {copy.placeFound}{lang === "fr" ? " : " : ": "}{pin.label}
             </p>
           )}
 
           {selected ? (
             <article className="detail" id="site-detail">
-              <p className={`kind-pill ${selected.kind === "avis" ? "avis" : selected.kind === "mtq" ? "mtq" : "work"}`}>
-                {selected.kind === "avis" ? copy.kindAvis : selected.kind === "mtq" ? copy.kindMtq : copy.kindWork}
+              <p className={`kind-pill ${selected.map_primary || "none"}`}>
+                {impactLabel(selected.resident_primary || selected.map_primary || "none", lang)}
               </p>
               <h2>{selected.title || selected.street || copy.unknown}</h2>
               <p className="borough-name">{selected.borough}</p>
+              <p className="signs-note">{copy.signsNote}</p>
+              {impactKinds(selected).length > 1 && (
+                <p className="hint">{impactKinds(selected).map((kind) => impactLabel(kind, lang)).join(" · ")}</p>
+              )}
               {selected.kind === "mtq" ? (
                 <>
                   <dl>
@@ -469,6 +793,10 @@ export default function App() {
               ) : (
                 <dl>
                   <div>
+                    <dt>{copy.impactLabel}</dt>
+                    <dd>{impactKinds(selected).map((kind) => impactLabel(kind, lang)).join(" · ") || copy.impactNone}</dd>
+                  </div>
+                  <div>
                     <dt>{copy.reason}</dt>
                     <dd>{reasonLabel(selected, lang)}</dd>
                   </div>
@@ -504,20 +832,20 @@ export default function App() {
           ) : (
             <>
               <h3>{copy.listTitle}</h3>
-              <SiteList items={works} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+              <SiteList items={shown.filter((item) => item.kind !== "avis" && item.kind !== "mtq")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               <h3>{copy.avisTitle}</h3>
               <p className="hint">{copy.avisHint}</p>
-              {avis.length === 0 ? (
+              {avis.filter((item) => showAll || item.closes).length === 0 ? (
                 <p className="hint">{copy.avisEmpty}</p>
               ) : (
-                <SiteList items={avis} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+                <SiteList items={shown.filter((item) => item.kind === "avis")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               )}
               <h3>{copy.mtqTitle}</h3>
               <p className="hint">{copy.mtqHint}</p>
-              {mtq.length === 0 ? (
+              {mtq.filter((item) => showAll || item.closes).length === 0 ? (
                 <p className="hint">{copy.mtqEmpty}</p>
               ) : (
-                <SiteList items={mtq} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
+                <SiteList items={shown.filter((item) => item.kind === "mtq")} selectedId={selectedId} onSelect={selectWork} copy={copy} lang={lang} />
               )}
             </>
           )}
@@ -527,7 +855,14 @@ export default function App() {
       </>
       )}
     </main>
-    <Footer lang={lang} importedAt={importedAt} avisImportedAt={avisImportedAt} mtqImportedAt={mtqImportedAt} formatImport={formatImport} />
+    <Footer
+      lang={lang}
+      importedAt={importedAt}
+      avisImportedAt={avisImportedAt}
+      mtqImportedAt={mtqImportedAt}
+      snowImportedAt={snowAvailable ? snowImportedAt : ""}
+      formatImport={formatImport}
+    />
     </>
   );
 }

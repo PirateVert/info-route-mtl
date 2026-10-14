@@ -1,7 +1,9 @@
-"""Monthly roadwork digest. $2 CAD, chosen alert types, chosen frequency.
+"""Paid My Places: $2 CAD / month, up to 5 favourites, email alerts.
 
-Preferences live on the Stripe subscription so they survive a server restart.
-Change detection uses a local snapshot of the last import.
+Paid includes alerts for new closures / no-parking near saved places
+(or along a saved route), plus a Sunday weekly summary.
+Free users save one place locally and do not receive email.
+Preferences live on the Stripe subscription so they survive a restart.
 """
 
 from __future__ import annotations
@@ -16,17 +18,20 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from places import PAID_MAX, PLACE_KINDS as SAVED_KINDS
+
 ROOT = Path(__file__).resolve().parent
 SNAPSHOT_PATH = ROOT / "data" / "digest_snapshot.json"
 PRICE_CENTS = 200
-ALERTS = ("new", "ending", "dates", "status", "who", "reason")
-FREQUENCIES = ("daily", "weekly", "biweekly", "monthly")
+ALERTS = ("closure", "parking", "new", "ending", "dates", "status", "who", "reason")
+PAID_ALERTS = ("closure", "parking")
+FREQUENCIES = ("weekly",)
 LANGS = ("fr", "en", "both")
-PLACE_TYPES = ("route", "street", "address", "intersection", "near_me")
-MAX_PLACES = 10
-ROUTE_RADIUS_M = 400
-ADDRESS_RADIUS_M = 250
-INTERSECTION_RADIUS_M = 220
+PLACE_TYPES = (*SAVED_KINDS, "near_me")
+MAX_PLACES = PAID_MAX
+ROUTE_RADIUS_M = 100
+ADDRESS_RADIUS_M = 100
+INTERSECTION_RADIUS_M = 100
 PROD_ORIGIN = "https://info-route-mtl.onrender.com"
 LOCAL_ORIGIN = re.compile(r"^http://(localhost|127\.0\.0\.1):\d+$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -37,8 +42,14 @@ router = APIRouter(prefix="/api")
 
 class PlaceIn(BaseModel):
     type: str = "street"
+    kind: str = ""
     query: str = ""
     via: str = ""
+    label: str = ""
+    lat: float | None = None
+    lng: float | None = None
+    end_lat: float | None = None
+    end_lng: float | None = None
 
 
 class CheckoutBody(BaseModel):
@@ -93,7 +104,7 @@ def _origin(origin: str) -> str:
 def _clean_place(raw: PlaceIn | dict) -> dict:
     if isinstance(raw, PlaceIn):
         raw = raw.model_dump()
-    kind = (raw.get("type") or "street").strip()
+    kind = (raw.get("kind") or raw.get("type") or "street").strip()
     if kind not in PLACE_TYPES:
         raise HTTPException(status_code=400, detail="bad_place")
     query = (raw.get("query") or "").strip()[:120]
@@ -117,8 +128,10 @@ def _clean_place(raw: PlaceIn | dict) -> dict:
     if kind == "street":
         if not server.street_tokens(query) and server.geocode(query) is None:
             raise HTTPException(status_code=400, detail="place_not_found")
-    elif kind == "address":
-        if server.geocode(query) is None:
+    elif kind in {"address", "home", "car", "work"}:
+        if server.geocode(query) is None and not (
+            isinstance(raw.get("lat"), (int, float)) and isinstance(raw.get("lng"), (int, float))
+        ):
             raise HTTPException(status_code=400, detail="place_not_found")
     elif kind == "intersection":
         joined = f"{query} et {via}"
@@ -131,7 +144,34 @@ def _clean_place(raw: PlaceIn | dict) -> dict:
             raise HTTPException(status_code=400, detail="place_not_found")
         if server.haversine(start["lat"], start["lng"], end["lat"], end["lng"]) < 80:
             raise HTTPException(status_code=400, detail="place_not_found")
-    return {"type": kind, "query": query, "via": via}
+        return {
+            "type": kind,
+            "query": query,
+            "via": via,
+            "label": (raw.get("label") or f"{query} → {via}")[:120],
+            "lat": start["lat"],
+            "lng": start["lng"],
+            "end_lat": end["lat"],
+            "end_lng": end["lng"],
+        }
+    point = None
+    if isinstance(raw.get("lat"), (int, float)) and isinstance(raw.get("lng"), (int, float)):
+        point = {"lat": float(raw["lat"]), "lng": float(raw["lng"])}
+    elif kind in {"address", "home", "car", "work"}:
+        point = server.geocode(query)
+    packed = {
+        "type": kind,
+        "query": query,
+        "via": via,
+        "label": (raw.get("label") or via or query)[:120],
+    }
+    if point:
+        packed["lat"] = point["lat"]
+        packed["lng"] = point["lng"]
+    if isinstance(raw.get("end_lat"), (int, float)) and isinstance(raw.get("end_lng"), (int, float)):
+        packed["end_lat"] = float(raw["end_lat"])
+        packed["end_lng"] = float(raw["end_lng"])
+    return packed
 
 
 def _clean_places(places: list[PlaceIn] | None, street: str = "") -> list[dict]:
@@ -151,7 +191,13 @@ def _clean_places(places: list[PlaceIn] | None, street: str = "") -> list[dict]:
 def _pack_places(places: list[dict]) -> dict:
     packed = {"places_n": str(len(places)), "street": places[0]["query"] if places else ""}
     for index, place in enumerate(places):
-        packed[f"w{index}"] = f"{place['type']}|{place['query'].replace('|', '/')}|{place['via'].replace('|', '/')}"
+        lat = place.get("lat")
+        lng = place.get("lng")
+        extra = f"|{lat}|{lng}" if isinstance(lat, (int, float)) and isinstance(lng, (int, float)) else ""
+        packed[f"w{index}"] = (
+            f"{place['type']}|{place['query'].replace('|', '/')}|{place['via'].replace('|', '/')}"
+            f"|{(place.get('label') or '').replace('|', '/')}{extra}"
+        )
     for index in range(len(places), MAX_PLACES):
         packed[f"w{index}"] = ""
     return packed
@@ -164,12 +210,20 @@ def _unpack_places(meta: dict) -> list[dict]:
         raw = (meta.get(f"w{index}") or "").strip()
         if not raw:
             continue
-        parts = raw.split("|", 2)
+        parts = raw.split("|")
         kind = parts[0] if parts and parts[0] in PLACE_TYPES else "street"
         query = parts[1] if len(parts) > 1 else ""
         via = parts[2] if len(parts) > 2 else ""
+        label = parts[3] if len(parts) > 3 else ""
+        place = {"type": kind, "query": query, "via": via, "label": label or query}
+        if len(parts) >= 6:
+            try:
+                place["lat"] = float(parts[4])
+                place["lng"] = float(parts[5])
+            except ValueError:
+                pass
         if query:
-            places.append({"type": kind, "query": query, "via": via})
+            places.append(place)
     if not places and (meta.get("street") or "").strip():
         places.append({"type": "street", "query": meta["street"].strip(), "via": ""})
     return places[:MAX_PLACES]
@@ -186,14 +240,10 @@ def _place_label(place: dict) -> str:
 
 
 def _clean_choices(alerts: list[str], frequency: str, language: str, borough: str, street: str, places: list[PlaceIn] | None) -> dict:
-    chosen = []
-    for alert in alerts:
-        if alert in ALERTS and alert not in chosen:
-            chosen.append(alert)
-    if not chosen:
-        raise HTTPException(status_code=400, detail="pick_alert")
+    # Paid product is 5 favourites + emails for those places. Client checkboxes are ignored.
+    chosen = list(PAID_ALERTS)
     if frequency not in FREQUENCIES:
-        raise HTTPException(status_code=400, detail="bad_frequency")
+        frequency = "weekly"
     if language not in LANGS:
         language = "fr"
     borough = (borough or "").strip()
@@ -270,8 +320,12 @@ def _match_place(works: list[dict], place: dict) -> list[dict]:
     if kind == "near_me":
         point = server.parse_coord_pair(query)
         return [work for work in works if _nearby(work, point, server.NEARBY_RADIUS_M)]
-    if kind == "address":
-        point = server.geocode(query)
+    if kind in {"address", "home", "car", "work"}:
+        point = None
+        if isinstance(place.get("lat"), (int, float)) and isinstance(place.get("lng"), (int, float)):
+            point = {"lat": float(place["lat"]), "lng": float(place["lng"])}
+        else:
+            point = server.geocode(query)
         return [work for work in works if _nearby(work, point, ADDRESS_RADIUS_M)]
     if kind == "intersection":
         point = server.geocode(f"{query} et {via}")
@@ -314,7 +368,7 @@ def _scope(borough: str, street: str = "", places: list[dict] | None = None) -> 
 
 def _fingerprint(work: dict) -> dict:
     return {
-        "street": work.get("street") or "",
+        "street": work.get("street") or work.get("title") or "",
         "borough": work.get("borough") or "",
         "reason": work.get("reason") or "",
         "organization": work.get("organization") or "",
@@ -322,6 +376,11 @@ def _fingerprint(work: dict) -> dict:
         "status": work.get("status") or "",
         "start": work.get("start") or "",
         "end": work.get("end") or "",
+        "street_closed": bool(work.get("street_closed")),
+        "lane_closed": bool(work.get("lane_closed")),
+        "sidewalk_closed": bool(work.get("sidewalk_closed")),
+        "no_parking": bool(work.get("no_parking")),
+        "closes": bool(work.get("closes")),
     }
 
 
@@ -361,6 +420,10 @@ def _ending_soon(work: dict) -> bool:
 def _kinds(previous: dict | None, work: dict | None) -> list[str]:
     if previous is None and work is not None:
         kinds = ["new"]
+        if work.get("closes"):
+            kinds.append("closure")
+        if work.get("no_parking"):
+            kinds.append("parking")
         if _ending_soon(work):
             kinds.append("ending")
         return kinds
@@ -377,6 +440,15 @@ def _kinds(previous: dict | None, work: dict | None) -> list[str]:
         kinds.append("who")
     if previous.get("reason") != work.get("reason"):
         kinds.append("reason")
+    if (not previous.get("closes") and work.get("closes")) or (
+        previous.get("street_closed") != work.get("street_closed")
+        or previous.get("lane_closed") != work.get("lane_closed")
+        or previous.get("sidewalk_closed") != work.get("sidewalk_closed")
+    ):
+        if work.get("closes"):
+            kinds.append("closure")
+    if not previous.get("no_parking") and work.get("no_parking"):
+        kinds.append("parking")
     if _ending_soon(work):
         kinds.append("ending")
     return kinds
