@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { COPY, storeLang } from "./i18n";
 
 const THEME_KEY = "inforoute-theme";
-const PARKS_URL = "https://parcs.lespiratesverts.org";
+const PARKS_URL = "https://parcs-mhm.onrender.com/";
 
 export function readTheme() {
   try {

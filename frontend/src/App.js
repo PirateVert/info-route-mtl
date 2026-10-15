@@ -504,9 +504,11 @@ export default function App() {
         <Subscribe lang={lang} savedPlaces={places} />
       ) : (
       <>
+      <div className="hero">
       <h1 className="page-title">{copy.title}</h1>
       <p className="tagline">{copy.tagline}</p>
       <p className="disclaimer">{copy.disclaimer}</p>
+      </div>
 
       <section className="home-places" id="places">
         <div className="places-head">
